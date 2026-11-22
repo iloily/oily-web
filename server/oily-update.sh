@@ -16,6 +16,9 @@ set_env() { if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else ech
 echo "== 2/6 In-game branding =="
 set_env MENU_ICON_URL "https://$D/assets/menu-icon.png"
 set_env MENU_ONCLICK_URL "https://$D"
+# osu!direct map search + downloads (catboy.best blocks the server, osu.direct works)
+set_env MIRROR_SEARCH_ENDPOINT "https://osu.direct/api/search"
+set_env MIRROR_DOWNLOAD_ENDPOINT "https://osu.direct/d"
 set_env SEASONAL_BGS "https://$D/assets/bg-1.jpg,https://$D/assets/bg-2.jpg"
 python3 - "$D" <<'PY'
 import sys
