@@ -4,6 +4,9 @@
 const API = "/api/v2";
 const SERVER_DOMAIN = "oily.ilystudios.net";
 const AVATARS = `https://a.${SERVER_DOMAIN}`;
+// Cloudflare Turnstile site key (public). Empty = no captcha on sign-up.
+// The matching secret goes in /opt/bancho/.env as CAPTCHA_PROVIDER=turnstile + CAPTCHA_SECRET.
+const TURNSTILE_SITEKEY = "";
 
 // ---------- leaderboards ----------
 // Each board maps the four rulesets (osu, taiko, catch, mania) to a bancho.py mode id.
@@ -438,6 +441,7 @@ async function register() {
       <label>Email<input name="email" type="email" autocomplete="email" required></label>
       <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="32" required></label>
       <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400"><input type="checkbox" required style="margin-top:4px"> I am 13 or older and agree to the <a href="/about" data-link>rules</a>.</label>
+      ${TURNSTILE_SITEKEY ? `<div id="captcha" style="min-height:65px"></div>` : ""}
       <div id="msg"></div>
       <button class="btn btn-accent" type="submit">Sign up</button>
     </form></div>`;
@@ -445,13 +449,30 @@ async function register() {
     e.preventDefault();
     const f = new FormData(e.target);
     const creds = { username: f.get("username"), password: f.get("password") };
+    const captcha_token = TURNSTILE_SITEKEY ? f.get("cf-turnstile-response") : null;
+    if (TURNSTILE_SITEKEY && !captcha_token) { $("#msg").innerHTML = `<div class="error">Please finish the captcha first.</div>`; return; }
     try {
-      await api("/accounts", { method: "POST", body: JSON.stringify({ ...creds, email: f.get("email") }) });
+      await api("/accounts", { method: "POST", body: JSON.stringify({ ...creds, email: f.get("email"), captcha_token }) });
       me = (await api("/sessions", { method: "POST", body: JSON.stringify(creds) })).data;
       renderAccount();
       navigate("/connect");
-    } catch (err) { $("#msg").innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+    } catch (err) {
+      $("#msg").innerHTML = `<div class="error">${esc(err.message)}</div>`;
+      if (window.turnstile) window.turnstile.reset("#captcha");
+    }
   };
+  if (TURNSTILE_SITEKEY) loadTurnstile().then(() => window.turnstile.render("#captcha", { sitekey: TURNSTILE_SITEKEY, theme: "dark" }));
+}
+
+let turnstileLoading;
+function loadTurnstile() {
+  turnstileLoading ??= new Promise((resolve, reject) => {
+    const sc = document.createElement("script");
+    sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    sc.onload = resolve; sc.onerror = reject;
+    document.head.appendChild(sc);
+  });
+  return turnstileLoading;
 }
 
 // ---------- profile settings ----------
