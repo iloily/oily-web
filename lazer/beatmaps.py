@@ -82,23 +82,38 @@ class BeatmapStore:
 
     async def lookup(self, *, id: int | None = None, md5: str | None = None, filename: str | None = None) -> dict | None:
         """One difficulty as a v1-style dict (plus 'web_status'), or None."""
-        rows: list[dict] = []
-        if id:
-            rows = await _mirror(b=id)
-        elif md5:
-            rows = await _mirror(h=md5)
-        if not rows and filename:
-            row = await self.db.one("select * from maps where filename = %s", (filename,))
-            if row:
-                rows = await _mirror(b=row["id"])
-        if not rows:
+        # the mirror can answer with the whole set (or the wrong difficulty), so always pick the exact one
+        def pick(rows: list[dict], *, want_id: int | None = None, want_md5: str | None = None) -> dict | None:
+            for r in rows:
+                if want_id and _i(r.get("beatmap_id")) == want_id:
+                    return r
+                if want_md5 and str(r.get("file_md5") or "").lower() == want_md5.lower():
+                    return r
             return None
-        m = rows[0]
+
+        m = None
+        if id:
+            m = pick(await _mirror(b=id), want_id=id)
+        elif md5:
+            m = pick(await _mirror(h=md5), want_md5=md5)
+            if m is None:
+                row = await self._bancho_row(md5=md5)
+                if row is None and filename:
+                    row = await self.db.one("select * from maps where filename = %s", (filename,))
+                if row:
+                    m = pick(await _mirror(b=row["id"]), want_id=row["id"]) or pick(await _mirror(s=row["set_id"]), want_id=row["id"])
+        if m is None and id:
+            row = await self._bancho_row(id=id)
+            if row:
+                m = pick(await _mirror(s=row["set_id"]), want_id=id)
+        if m is None:
+            return None
+        m = dict(m)
         m["web_status"] = await self.status(_i(m.get("beatmap_id")), _i(m.get("approved")))
         return m
 
     async def set_rows(self, set_id: int) -> list[dict]:
-        rows = await _mirror(s=set_id)
+        rows = [dict(r) for r in await _mirror(s=set_id) if _i(r.get("beatmapset_id")) == set_id]
         for m in rows:
             m["web_status"] = await self.status(_i(m.get("beatmap_id")), _i(m.get("approved")))
         return rows

@@ -40,7 +40,9 @@ pp_lock = asyncio.Lock()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.connect()
+    task = asyncio.create_task(recheck_unranked())
     yield
+    task.cancel()
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -457,6 +459,49 @@ async def recalc_stats(user_id: int, ruleset_id: int, board: str) -> None:
          int(grades["s"] or 0), int(grades["sh"] or 0), int(grades["a"] or 0), user_id, ruleset_id, board))
 
 
+async def rank_score(score_id: int, m: dict | None) -> None:
+    """Decide whether a saved score is ranked, give it pp, and update the best score and stats for its board."""
+    row = await db.one("select * from lazer_scores where id = %s", (score_id,))
+    if not row or not row["passed"] or m is None:
+        return
+    status = m["web_status"]
+    if status not in (1, 2, 4) or str(m.get("file_md5") or "").lower() != row["beatmap_md5"].lower():
+        return
+    user_id, beatmap_id, ruleset_id, board = row["user_id"], row["beatmap_id"], row["ruleset_id"], row["board"]
+    mods, stats = json.loads(row["mods"]), json.loads(row["statistics"])
+    pp = 0.0
+    if status in (1, 2):
+        osu_file = await maps.osu_file(beatmap_id, row["beatmap_md5"])
+        if osu_file:
+            async with pp_lock:
+                try:
+                    pp = await asyncio.to_thread(scoring.calculate_pp, osu_file, ruleset_id, mods, stats, row["max_combo"])
+                except Exception as exc:
+                    print("pp failed", beatmap_id, exc, flush=True)
+    await db.execute("update lazer_scores set ranked = 1, pp = %s where id = %s", (pp, score_id))
+
+    # keep one best score per map/board: highest pp on pp maps, highest score otherwise
+    prev = await db.one("select id, pp, total_score from lazer_scores where user_id = %s and beatmap_id = %s and ruleset_id = %s "
+                        "and board = %s and best = 1 and id <> %s", (user_id, beatmap_id, ruleset_id, board, score_id))
+    total = int(row["total_score"])
+    better = prev is None or ((pp, total) > (float(prev["pp"]), int(prev["total_score"])) if status in (1, 2)
+                              else total > int(prev["total_score"]))
+    if better:
+        if prev:
+            await db.execute("update lazer_scores set best = 0 where id = %s", (prev["id"],))
+        await db.execute("update lazer_scores set best = 1 where id = %s", (score_id,))
+    await recalc_stats(user_id, ruleset_id, board)
+
+
+async def recheck_unranked() -> None:
+    """Scores saved as unranked because the map couldn't be looked up get another chance at startup."""
+    for r in await db.all("select id, beatmap_id from lazer_scores where passed = 1 and ranked = 0 and ended_at > now() - interval 30 day"):
+        try:
+            await rank_score(r["id"], await maps.lookup(id=r["beatmap_id"]))
+        except Exception as exc:
+            print("recheck failed", r["id"], exc, flush=True)
+
+
 @app.put("/api/v2/beatmaps/{beatmap_id}/solo/scores/{token_id}")
 async def submit_score(beatmap_id: int, token_id: int, request: Request, user: dict = Depends(current_user)):
     token = await db.one("select * from lazer_score_tokens where id = %s and user_id = %s", (token_id, user["id"]))
@@ -477,39 +522,14 @@ async def submit_score(beatmap_id: int, token_id: int, request: Request, user: d
         grade = scoring.grade(ruleset_id, accuracy, mods, stats, passed)
     board = scoring.board_for(mods, ruleset_id)
 
-    m = await maps.lookup(id=beatmap_id)
-    status = m["web_status"] if m else 0
-    ranked = passed and status in (1, 2, 4) and (not m or m.get("file_md5") == token["beatmap_md5"])
-    pp = 0.0
-    if ranked and status in (1, 2):
-        osu_file = await maps.osu_file(beatmap_id, token["beatmap_md5"])
-        if osu_file:
-            async with pp_lock:
-                try:
-                    pp = await asyncio.to_thread(scoring.calculate_pp, osu_file, ruleset_id, mods, stats, combo)
-                except Exception as exc:
-                    print("pp failed", beatmap_id, exc, flush=True)
-
     ended = datetime.now(timezone.utc).replace(tzinfo=None)
     score_id = await db.execute(
         "insert into lazer_scores (user_id, beatmap_id, beatmap_md5, ruleset_id, board, total_score, accuracy, max_combo, grade, pp, mods, "
-        "statistics, maximum_statistics, passed, ranked, best, ended_at) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)",
-        (user["id"], beatmap_id, token["beatmap_md5"], ruleset_id, board, int(body.get("total_score") or 0), accuracy, combo, grade, pp,
-         json.dumps(mods), json.dumps(stats), json.dumps(body.get("maximum_statistics") or {}), passed, ranked, ended),
+        "statistics, maximum_statistics, passed, ranked, best, ended_at) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s, 0, 0, %s)",
+        (user["id"], beatmap_id, token["beatmap_md5"], ruleset_id, board, int(body.get("total_score") or 0), accuracy, combo, grade,
+         json.dumps(mods), json.dumps(stats), json.dumps(body.get("maximum_statistics") or {}), passed, ended),
     )
     await db.execute("update lazer_score_tokens set score_id = %s where id = %s", (score_id, token_id))
-
-    # keep one best score per map/board: highest pp on pp maps, highest score otherwise
-    if ranked:
-        prev = await db.one("select id, pp, total_score from lazer_scores where user_id = %s and beatmap_id = %s and ruleset_id = %s "
-                            "and board = %s and best = 1", (user["id"], beatmap_id, ruleset_id, board))
-        new_total = int(body.get("total_score") or 0)
-        better = prev is None or ((pp, new_total) > (float(prev["pp"]), int(prev["total_score"])) if status in (1, 2)
-                                  else new_total > int(prev["total_score"]))
-        if better:
-            if prev:
-                await db.execute("update lazer_scores set best = 0 where id = %s", (prev["id"],))
-            await db.execute("update lazer_scores set best = 1 where id = %s", (score_id,))
 
     hits = sum(int(v) for k, v in stats.items() if k not in ("miss", "large_tick_miss", "small_tick_miss", "ignore_miss", "combo_break"))
     await db.execute(
@@ -518,8 +538,8 @@ async def submit_score(beatmap_id: int, token_id: int, request: Request, user: d
         "total_hits = total_hits + values(total_hits), max_combo = greatest(max_combo, values(max_combo))",
         (user["id"], ruleset_id, board, int(body.get("total_score") or 0), hits, combo),
     )
-    if ranked:
-        await recalc_stats(user["id"], ruleset_id, board)
+    m = await maps.lookup(id=beatmap_id)
+    await rank_score(score_id, m)
     row = await db.one("select * from lazer_scores where id = %s", (score_id,))
     return score_json(row, user, beatmap=m)
 
