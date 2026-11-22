@@ -22,6 +22,6 @@ def test_difficulty_adjust_gives_no_pp(tmp_path):
     assert scoring.calculate_pp(tmp_path / "missing.osu", 0, [{"acronym": "HD"}, {"acronym": "MG"}], {}, 0) == 0.0
 
 
-def test_custom_speed_goes_to_mods_board():
-    assert scoring.board_for([{"acronym": "DT", "settings": {"speed_change": 1.3}}], 0) == scoring.BOARD_MODS
+def test_custom_speed_stays_on_normal_boards():
+    assert scoring.board_for([{"acronym": "DT", "settings": {"speed_change": 1.3}}], 0) == scoring.BOARD_VANILLA
     assert scoring.board_for([{"acronym": "RX"}, {"acronym": "DT"}], 0) == scoring.BOARD_RELAX
