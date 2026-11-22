@@ -54,6 +54,7 @@ h3 { font-size: 17px; }
 .page { flex: 1; width: 100%; max-width: 1100px; margin: 0 auto; padding: 28px 16px 48px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
 .card + .card { margin-top: 16px; }
+.grid > .card + .card { margin-top: 0; }
 .grid { display: grid; gap: 16px; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -65,8 +66,8 @@ h3 { font-size: 17px; }
 .footer-inner { max-width: 1100px; margin: 0 auto; padding: 18px 16px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
 
 /* controls */
-input, select { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; outline: none; }
-input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 59, 92, 0.2); }
+input, select, textarea { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font: inherit; outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 59, 92, 0.2); }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); border-radius: 10px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; }
 .btn:hover { background: var(--surface-3); color: var(--text); }
 .btn-accent { background: linear-gradient(135deg, var(--accent), var(--heart)); border-color: transparent; box-shadow: 0 6px 24px rgba(255, 59, 92, 0.35); }
@@ -127,6 +128,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .score-row .sub { color: var(--muted); font-size: 13px; }
 .score-row .right { text-align: right; flex: none; }
 .mods { color: var(--accent-2); font-weight: 700; font-size: 13px; }
+
+.userpage { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea { resize: vertical; min-height: 100px; }
+input[type=file] { padding: 7px; }
 
 /* beatmap */
 .cover { height: 180px; border-radius: var(--radius); background-size: cover; background-position: center; position: relative; overflow: hidden; border: 1px solid var(--line); }

@@ -46,8 +46,10 @@ function flag(cc) {
   if (!cc || cc === "xx") return "";
   return `<img class="flag" src="https://flagcdn.com/w40/${esc(cc.toLowerCase())}.png" alt="${esc(cc.toUpperCase())}" title="${esc(cc.toUpperCase())}" loading="lazy">`;
 }
+// bumped after an avatar upload so browsers fetch the new picture
+let avatarBust = "";
 function avatar(id, size) {
-  return `<img class="avatar" src="${AVATARS}/${Number(id)}" width="${size}" height="${size}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.jpg'">`;
+  return `<img class="avatar" src="${AVATARS}/${Number(id)}${avatarBust}" width="${size}" height="${size}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.jpg'">`;
 }
 function cover(setId, kind = "list") { return `https://assets.ppy.sh/beatmaps/${Number(setId)}/covers/${kind}.jpg`; }
 
@@ -70,7 +72,7 @@ function grade(g) { return `<span class="grade grade-${esc(g)}">${esc(g === "XH"
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     credentials: "same-origin",
-    headers: opts.body ? { "Content-Type": "application/json" } : {},
+    headers: typeof opts.body === "string" ? { "Content-Type": "application/json" } : {},
     ...opts,
   });
   let body = null;
@@ -94,6 +96,7 @@ function renderAccount() {
   const box = $("#nav-account");
   if (me) {
     box.innerHTML = `<a class="player" href="/u/${me.id}" data-link>${avatar(me.id, 28)}<span>${esc(me.name)}</span></a>
+      <a class="btn btn-small" href="/settings" data-link>Settings</a>
       <button class="btn btn-small" id="logout">Log out</button>`;
     $("#logout").onclick = async () => {
       try { await api("/sessions/current", { method: "DELETE" }); } catch { /* already gone */ }
@@ -112,6 +115,7 @@ const routes = [
   [/^\/about$/, about],
   [/^\/login$/, login],
   [/^\/register$/, register],
+  [/^\/settings$/, settings],
   [/^\/u\/([^/]+)$/, profile],
   [/^\/b\/(\d+)$/, beatmap],
 ];
@@ -293,8 +297,13 @@ async function profile(idOrName) {
   document.title = `${player.name} · o!ily`;
 
   const stableBoards = BOARDS.filter((b) => !b.lazer);
-  const b = board.lazer ? stableBoards[1] : board;
+  let b = board.lazer ? stableBoards[1] : board;
   let rs = Number(q.get("rs") || 0);
+  if (!q.get("board")) {
+    // no choice in the address: open the player's main mode
+    const home = stableBoards.find((x) => x.modes.includes(player.preferred_mode));
+    if (home) { b = home; rs = home.modes.indexOf(player.preferred_mode); }
+  }
   if (b.modes[rs] == null) rs = 0;
   const mode = b.modes[rs];
 
@@ -320,7 +329,9 @@ async function profile(idOrName) {
             <span class="muted">· Joined ${new Date(player.creation_time * 1000).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
           </div>
         </div>
+        ${me && me.id === player.id ? `<div class="spacer"></div><a class="btn btn-small" href="/settings" data-link>Edit profile</a>` : ""}
       </div>
+      ${player.userpage_content ? `<div class="userpage">${esc(player.userpage_content)}</div>` : ""}
     </div>
     <div class="row" style="margin:16px 0">
       <div class="pills">${stableBoards.map((x) => `<button data-board="${x.key}" class="${x.key === b.key ? "on" : ""}">${x.label}</button>`).join("")}</div>
@@ -432,6 +443,95 @@ async function register() {
   };
 }
 
+// ---------- profile settings ----------
+const COUNTRIES = "ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bl bm bn bo bq br bs bt bv bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg eh er es et fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mf mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd se sg sh si sj sk sl sm sn so sr ss st sv sx sy sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug um us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw".split(" ");
+const MODE_NAMES = [[0, "osu!"], [4, "osu! Relax"], [1, "taiko"], [5, "taiko Relax"], [2, "catch"], [6, "catch Relax"], [3, "mania"], [8, "osu! Autopilot"]];
+
+async function settings() {
+  document.title = "Settings · o!ily";
+  if (!me) return navigate("/login");
+  const names = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+  const countryName = (c) => { try { return names ? names.of(c.toUpperCase()) : c.toUpperCase(); } catch { return c.toUpperCase(); } };
+  const countries = COUNTRIES.map((c) => [c, countryName(c)]).sort((a, b) => a[1].localeCompare(b[1]));
+  const msg = (id, ok, text) => { $(id).innerHTML = `<div class="${ok ? "ok" : "error"}">${esc(text)}</div>`; };
+
+  app.innerHTML = `
+    <h1>Settings</h1>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Profile picture</h3>
+        <div class="row" style="margin-bottom:12px">${avatar(me.id, 96)}<p class="muted" style="margin:0;flex:1">PNG or JPG, up to 2 MB. Square pictures look best. It shows in game too (restart osu! to see it).</p></div>
+        <form id="f-avatar" class="row">
+          <input type="file" name="file" accept="image/png,image/jpeg" required style="flex:1;min-width:0">
+          <button class="btn btn-accent" type="submit">Upload</button>
+        </form>
+        <div id="m-avatar" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h3>Profile</h3>
+        <form id="f-profile" class="form" style="max-width:none">
+          <label>Username<input name="username" value="${esc(me.name)}" minlength="2" maxlength="15" required></label>
+          <label>Country<select name="country">${countries.map(([c, n]) => `<option value="${c}" ${c === me.country ? "selected" : ""}>${esc(n)}</option>`).join("")}<option value="xx" ${me.country === "xx" ? "selected" : ""}>Hidden</option></select></label>
+          <label>Main mode (opens first on your profile)<select name="preferred_mode">${MODE_NAMES.map(([m, n]) => `<option value="${m}" ${m === me.preferred_mode ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+          <label>About me<textarea name="userpage_content" rows="6" maxlength="2048" placeholder="Say hi, list your skins, link your socials...">${esc(me.userpage_content || "")}</textarea></label>
+          <div id="m-profile"></div>
+          <button class="btn btn-accent" type="submit">Save profile</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Password</h3>
+        <form id="f-password" class="form" style="max-width:none">
+          <label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+          <label>New password<input name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="32" required></label>
+          <div id="m-password"></div>
+          <button class="btn" type="submit">Change password</button>
+        </form>
+      </div>
+    </div>`;
+
+  $("#f-avatar").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = e.target.file.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return msg("#m-avatar", false, "That picture is over 2 MB.");
+    const body = new FormData();
+    body.append("avatar_file", file);
+    try {
+      await api(`/players/${me.id}/avatar`, { method: "PUT", body });
+      avatarBust = `?v=${Date.now()}`;
+      renderAccount();
+      await settings();
+      msg("#m-avatar", true, "Profile picture updated.");
+    } catch (err) { msg("#m-avatar", false, err.message); }
+  };
+
+  $("#f-profile").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const changes = {
+      country: f.get("country"),
+      preferred_mode: Number(f.get("preferred_mode")),
+      userpage_content: f.get("userpage_content").trim() || null,
+    };
+    if (f.get("username").trim() !== me.name) changes.username = f.get("username").trim();
+    try {
+      me = (await api(`/players/${me.id}`, { method: "PATCH", body: JSON.stringify(changes) })).data;
+      renderAccount();
+      msg("#m-profile", true, "Saved.");
+    } catch (err) { msg("#m-profile", false, err.message); }
+  };
+
+  $("#f-password").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api(`/players/${me.id}/password`, { method: "PUT", body: JSON.stringify({ current_password: f.get("current_password"), new_password: f.get("new_password") }) });
+      e.target.reset();
+      msg("#m-password", true, "Password changed.");
+    } catch (err) { msg("#m-password", false, err.message); }
+  };
+}
+
 // ---------- player search ----------
 let searchTimer;
 $("#search").addEventListener("input", (e) => {
@@ -449,5 +549,4 @@ $("#search").addEventListener("input", (e) => {
 });
 document.addEventListener("click", (e) => { if (!e.target.closest(".nav-search")) $("#search-results").hidden = true; });
 
-loadSession();
-render();
+loadSession().then(render);
