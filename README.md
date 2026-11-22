@@ -12,11 +12,20 @@ Plain HTML, CSS and JavaScript with no build step. It reads the server's
 - Player profiles (`/u/<id or name>`) and beatmap pages (`/b/<id>`)
 - Sign up, log in, how to connect, about and rules
 
-## Deploying
+## Server
 
-On the server, the site is cloned to `/opt/oily-web` and served by Caddy
-(`try_files {path} /index.html`), with `/api/*` proxied to bancho.py.
-To update: `cd /opt/oily-web && git pull`. No restart needed.
+`server/oily-update.sh` sets up or updates everything on the VPS (run as root):
+
+    curl -fsSL https://raw.githubusercontent.com/iloily/oily-web/main/server/oily-update.sh | bash
+
+It pulls this repo to `/opt/oily-web`, writes the Caddy config (site, `/api/*` to bancho.py,
+`/extras/*` to the extras service, avatars on `a.`), applies the o!ily in-game branding,
+starts `extras/`, and installs nightly backups to `/opt/backups`.
+
+## extras/
+
+A small FastAPI service next to bancho.py for profile banners and colours,
+o!ily Ranked tracking and map requests. bancho.py itself stays unmodified.
 
 ## Credits
 
