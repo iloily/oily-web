@@ -169,7 +169,8 @@
 //!
 
 #![cfg_attr(docsrs, feature(doc_cfg), deny(broken_intra_doc_links))]
-#![deny(
+// o!ily: warn instead of deny, so newer Rust versions still build this copy.
+#![warn(
     clippy::all,
     nonstandard_style,
     rust_2018_idioms,

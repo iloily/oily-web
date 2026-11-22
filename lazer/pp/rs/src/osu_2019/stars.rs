@@ -20,10 +20,21 @@ const NORMALIZED_RADIUS: f32 = 52.0;
 /// processing stack leniency is relatively expensive.
 ///
 /// In case of a partial play, e.g. a fail, one can specify the amount of passed objects.
-pub fn stars(map: &Beatmap, mods: u32, passed_objects: Option<usize>) -> OsuDifficultyAttributes {
+pub fn stars(
+    map: &Beatmap,
+    mods: u32,
+    passed_objects: Option<usize>,
+    clock_rate: Option<f64>,
+) -> OsuDifficultyAttributes {
     let take = passed_objects.unwrap_or(map.hit_objects.len());
 
-    let map_attributes = map.attributes().mods(mods).build();
+    // o!ily: an exact song speed (lazer custom rates) replaces the speed from DT/HT.
+    let mut attributes_builder = map.attributes();
+    attributes_builder.mods(mods);
+    if let Some(clock_rate) = clock_rate {
+        attributes_builder.clock_rate(clock_rate);
+    }
+    let map_attributes = attributes_builder.build();
 
     let mut diff_attributes = OsuDifficultyAttributes {
         ar: map_attributes.ar,

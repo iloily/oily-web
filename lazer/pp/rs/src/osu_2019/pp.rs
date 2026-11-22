@@ -41,6 +41,7 @@ pub struct OsuPP<'m> {
     n50: Option<usize>,
     n_misses: usize,
     passed_objects: Option<usize>,
+    clock_rate: Option<f64>,
 }
 
 impl<'m> OsuPP<'m> {
@@ -59,6 +60,7 @@ impl<'m> OsuPP<'m> {
             n50: None,
             n_misses: 0,
             passed_objects: None,
+            clock_rate: None,
         }
     }
 
@@ -82,6 +84,14 @@ impl<'m> OsuPP<'m> {
     #[inline]
     pub fn mods(mut self, mods: u32) -> Self {
         self.mods = mods;
+
+        self
+    }
+
+    /// o!ily: exact song speed, e.g. 1.3 for a lazer DT at 1.3x. Replaces the speed from DT/HT.
+    #[inline]
+    pub fn clock_rate(mut self, clock_rate: f64) -> Self {
+        self.clock_rate = Some(clock_rate);
 
         self
     }
@@ -234,7 +244,7 @@ impl<'m> OsuPP<'m> {
     /// containing stars and other attributes.
     pub fn calculate(mut self) -> OsuPerformanceAttributes {
         if self.attributes.is_none() {
-            let attributes = stars(self.map, self.mods, self.passed_objects);
+            let attributes = stars(self.map, self.mods, self.passed_objects, self.clock_rate);
             self.attributes.replace(attributes);
         }
 

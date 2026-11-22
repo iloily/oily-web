@@ -241,6 +241,7 @@ impl PyCalculator {
             n100,
             n50,
             passed_objects,
+            clock_rate,
         };
 
         if let Some(n_misses) = self.n_misses {
