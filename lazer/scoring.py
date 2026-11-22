@@ -63,8 +63,17 @@ def legacy_counts(ruleset_id: int, stats: dict) -> dict:
 
 # Lazer mods whose "speed_change" setting changes the song speed, with lazer's default speed.
 RATE_MODS = {"DT": 1.5, "NC": 1.5, "HT": 0.75, "DC": 0.75}
-# Mods that give no pp: Difficulty Adjust lets players pick easier CS/AR/OD/HP, too easy to abuse.
-NO_PP_MODS = {"DA"}
+# Mods that give no pp (the score still shows): they make maps easier, aim for you, change speed mid-map,
+# or turn the map into something else, so their pp can't be compared fairly.
+NO_PP_MODS = {
+    "DA",  # Difficulty Adjust: pick your own CS/AR/OD/HP
+    "MG",  # Magnetised: pulls the cursor to notes
+    "AS", "WU", "WD",  # Adaptive Speed, Wind Up, Wind Down: speed changes during the map
+    "SR",  # Simplified Rhythm (taiko)
+    "HO",  # Hold Off (mania)
+    "TP",  # Target Practice: replaces the map's notes
+    "AT", "CN",  # Autoplay, Cinema
+}
 
 
 def _number(value) -> float | None:

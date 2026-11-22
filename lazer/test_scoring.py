@@ -19,6 +19,7 @@ def test_custom_speeds():
 
 def test_difficulty_adjust_gives_no_pp(tmp_path):
     assert scoring.calculate_pp(tmp_path / "missing.osu", 0, [{"acronym": "DA", "settings": {"approach_rate": 11}}], {}, 0) == 0.0
+    assert scoring.calculate_pp(tmp_path / "missing.osu", 0, [{"acronym": "HD"}, {"acronym": "MG"}], {}, 0) == 0.0
 
 
 def test_custom_speed_goes_to_mods_board():
