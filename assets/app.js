@@ -47,7 +47,7 @@ function flag(cc) {
   return `<img class="flag" src="https://flagcdn.com/w40/${esc(cc.toLowerCase())}.png" alt="${esc(cc.toUpperCase())}" title="${esc(cc.toUpperCase())}" loading="lazy">`;
 }
 function avatar(id, size) {
-  return `<img class="avatar" src="${AVATARS}/${Number(id)}" width="${size}" height="${size}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/assets/logo.svg'">`;
+  return `<img class="avatar" src="${AVATARS}/${Number(id)}" width="${size}" height="${size}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.jpg'">`;
 }
 function cover(setId, kind = "list") { return `https://assets.ppy.sh/beatmaps/${Number(setId)}/covers/${kind}.jpg`; }
 
