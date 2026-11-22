@@ -16,7 +16,9 @@ Plain HTML, CSS and JavaScript with no build step. It reads the server's
 
 `server/oily-update.sh` sets up or updates everything on the VPS (run as root):
 
-    curl -fsSL https://raw.githubusercontent.com/iloily/oily-web/main/server/oily-update.sh | bash
+    git -C /opt/oily-web pull -q && bash /opt/oily-web/server/oily-update.sh
+
+(First time: `git clone https://github.com/iloily/oily-web /opt/oily-web`.)
 
 It pulls this repo to `/opt/oily-web`, writes the Caddy config (site, `/api/*` to bancho.py,
 `/extras/*` to the extras service, avatars on `a.`), applies the o!ily in-game branding,
