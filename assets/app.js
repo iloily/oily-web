@@ -12,13 +12,12 @@ const TURNSTILE_SITEKEY = "0x4AAAAAAGNnlzR1MzxkFoBI";
 
 // ---------- leaderboards ----------
 // Each board maps the four rulesets (osu, taiko, catch, mania) to a mode id (null = not on that board).
-// Stable boards use bancho.py mode ids; lazer boards come from the o!ily lazer server at /lazer.
+// Stable boards use bancho.py mode ids; normal lazer scores are saved there too, so "Regular" is stable + lazer.
+// Lazer Relax comes from the o!ily lazer server at /lazer. Old ?board=lazer / lazer-mods links fall back to Regular.
 const BOARDS = [
-  { key: "stable", label: "Stable", modes: [0, 1, 2, 3] },
+  { key: "stable", label: "Regular", modes: [0, 1, 2, 3] },
   { key: "stable-rx", label: "Stable Relax", modes: [4, 5, 6, null] },
-  { key: "lazer", label: "Lazer", lazer: "vn", modes: [0, 1, 2, 3] },
   { key: "lazer-rx", label: "Lazer Relax", lazer: "rx", modes: [0, 1, 2, null] },
-  { key: "lazer-mods", label: "Lazer Mods", lazer: "mods", modes: [0, 1, 2, 3], note: "fun and conversion mods" },
 ];
 const RULESETS = ["osu!", "taiko", "catch", "mania"];
 const SORTS = [

@@ -3,7 +3,8 @@
 Speaks the subset of the osu-web API (and its OAuth) that osu!lazer needs for
 solo play: login, profiles, beatmap lookups, leaderboards and score
 submission. Accounts are bancho.py's, so one o!ily account works on stable and
-lazer. Lazer scores go to three boards: vanilla, relax and mods.
+lazer. Normal lazer scores (fun mods included) are saved as stable scores so
+both clients share one board (see stable.py); Lazer Relax has its own board.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 import scoring
+import stable
 from beatmaps import RULESET_SHORT, BeatmapStore
 from db import DB
 
@@ -34,13 +36,16 @@ STAFF_BITS = (1 << 11) | (1 << 12) | (1 << 13) | (1 << 14)
 
 db = DB()
 maps = BeatmapStore(db)
+shared = stable.Stable(db)
+shared_lock = asyncio.Lock()
 pp_lock = asyncio.Lock()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.connect()
-    task = asyncio.create_task(recheck_unranked())
+    await add_columns()
+    task = asyncio.create_task(startup_jobs())
     yield
     task.cancel()
 
@@ -154,7 +159,38 @@ async def ranks_for(user_id: int, ruleset_id: int, board: str, country: str) -> 
     return above["n"] + 1, above_cc["n"] + 1
 
 
+async def stable_statistics(user: dict, mode: int) -> dict:
+    """Stats from bancho.py's table (shared by stable and lazer)."""
+    s = await db.one("select * from stats where id = %s and mode = %s", (user["id"], mode)) or {}
+    rank = country_rank = None
+    if s.get("pp", 0) > 0:
+        above = await db.one("select count(*) n from stats s join users u on u.id = s.id where s.mode = %s and s.pp > %s and (u.priv & 1) = 1",
+                             (mode, s["pp"]))
+        above_cc = await db.one("select count(*) n from stats s join users u on u.id = s.id where s.mode = %s and s.pp > %s "
+                                "and (u.priv & 1) = 1 and u.country = %s", (mode, s["pp"], user["country"]))
+        rank, country_rank = above["n"] + 1, above_cc["n"] + 1
+    return {
+        "level": level_for(int(s.get("tscore", 0))),
+        "global_rank": rank,
+        "country_rank": country_rank,
+        "pp": float(s.get("pp", 0)),
+        "ranked_score": int(s.get("rscore", 0)),
+        "hit_accuracy": float(s.get("acc", 0)),
+        "play_count": int(s.get("plays", 0)),
+        "play_time": int(s.get("playtime", 0)),
+        "total_score": int(s.get("tscore", 0)),
+        "total_hits": int(s.get("total_hits", 0)),
+        "maximum_combo": int(s.get("max_combo", 0)),
+        "replays_watched_by_others": int(s.get("replay_views", 0)),
+        "is_ranked": rank is not None,
+        "grade_counts": {"ss": s.get("x_count", 0), "ssh": s.get("xh_count", 0), "s": s.get("s_count", 0),
+                         "sh": s.get("sh_count", 0), "a": s.get("a_count", 0)},
+    }
+
+
 async def statistics(user: dict, ruleset_id: int, board: str = scoring.BOARD_VANILLA) -> dict:
+    if board == scoring.BOARD_VANILLA:
+        return await stable_statistics(user, ruleset_id)
     s = await db.one("select * from lazer_stats where user_id = %s and ruleset_id = %s and board = %s", (user["id"], ruleset_id, board)) or {}
     rank, country_rank = await ranks_for(user["id"], ruleset_id, board, user["country"])
     return {
@@ -379,8 +415,94 @@ def score_json(row: dict, user_row: dict | None, position: int | None = None, be
     return out
 
 
-def board_from_request_mods(mod_list: list[str]) -> str:
-    return scoring.board_for([{"acronym": m} for m in mod_list], 0)
+def stable_score_json(r: dict, position: int | None = None, beatmap: dict | None = None) -> dict:
+    """A bancho.py score (set on stable, or on lazer and saved there) in the shape lazer expects."""
+    mode = int(r["mode"]) % 4
+    statistics_, maximum = stable.statistics_from_counts(mode, r)
+    passed = int(r["status"]) != 0
+    out = {
+        "id": stable.STABLE_ID + int(r["id"]),
+        "user_id": r["userid"],
+        "beatmap_id": int(beatmap["beatmap_id"]) if beatmap else r.get("map_id"),
+        "ruleset_id": mode,
+        "build_id": None,
+        "passed": passed,
+        "total_score": stable.standardised_score(mode, int(r["score"]), r),
+        "total_score_without_mods": stable.standardised_score(mode, int(r["score"]), r),
+        "accuracy": float(r["acc"]) / 100,
+        "max_combo": int(r["max_combo"]),
+        "rank": r["grade"] if r["grade"] in ("XH", "X", "SH", "S", "A", "B", "C", "D") else "F" if not passed else "D",
+        "mods": stable.mods_from_bits(int(r["mods"])),
+        "statistics": statistics_,
+        "maximum_statistics": maximum,
+        "started_at": None,
+        "ended_at": iso(r["play_time"]),
+        "pp": float(r["pp"]) if r["pp"] else None,
+        "has_replay": False,
+        "ranked": True,
+        "preserve": True,
+        "processed": True,
+        "legacy_score_id": int(r["id"]),
+        "legacy_total_score": int(r["score"]),
+        "type": "solo_score",
+    }
+    if position is not None:
+        out["position"] = position
+    if "name" in r:
+        out["user"] = compact_user({"id": r["userid"], "name": r["name"], "country": r["country"], "latest_activity": r["latest_activity"]})
+    if beatmap is not None:
+        out["beatmap"] = maps.web_beatmap(beatmap, with_set=False)
+        out["beatmapset"] = maps.web_set([beatmap], with_beatmaps=False)
+    return out
+
+
+async def shared_score_json(r: dict, position: int | None = None, beatmap: dict | None = None) -> dict:
+    """Scores that came from lazer keep their real lazer mods and score; stable ones are converted."""
+    lz = await db.one("select * from lazer_scores where bancho_score_id = %s", (r["id"],))
+    if not lz:
+        return stable_score_json(r, position, beatmap)
+    user_row = {"id": r["userid"], "name": r["name"], "country": r["country"], "latest_activity": r["latest_activity"]} if "name" in r else None
+    out = score_json({**lz, "ranked": 1, "pp": r["pp"]}, user_row, position, beatmap)
+    out["legacy_score_id"] = int(r["id"])
+    out["legacy_total_score"] = int(r["score"])
+    return out
+
+
+async def map_md5(beatmap_id: int) -> str | None:
+    row = await db.one("select md5 from maps where id = %s", (beatmap_id,))
+    if row:
+        return row["md5"]
+    m = await maps.lookup(id=beatmap_id)
+    return str(m.get("file_md5")) if m else None
+
+
+async def stable_beatmap_scores(beatmap_id: int, ruleset_id: int, scope: str, limit: int, user: dict | None) -> dict:
+    md5 = await map_md5(beatmap_id)
+    if not md5:
+        return {"scores": [], "user_score": None, "score_count": 0}
+    where = "s.map_md5 = %s and s.mode = %s and s.status = 2 and (u.priv & 1) = 1"
+    args: list = [md5, ruleset_id]
+    if scope == "country" and user:
+        where += " and u.country = %s"
+        args.append(user["country"])
+    elif scope == "friend" and user:
+        where += " and (s.userid = %s or s.userid in (select user2 from relationships where user1 = %s and type = 'friend'))"
+        args += [user["id"], user["id"]]
+    rows = await db.all(
+        f"select s.*, u.name, u.country, u.latest_activity from scores s join users u on u.id = s.userid "
+        f"where {where} order by s.score desc, s.id asc limit %s", tuple(args + [limit]))
+    scores = [await shared_score_json({**r, "map_id": beatmap_id}, i + 1) for i, r in enumerate(rows)]
+    total = await db.one(f"select count(*) n from scores s join users u on u.id = s.userid where {where}", tuple(args))
+    user_score = None
+    if user:
+        mine = await db.one("select s.*, u.name, u.country, u.latest_activity from scores s join users u on u.id = s.userid "
+                            "where s.map_md5 = %s and s.mode = %s and s.status = 2 and s.userid = %s", (md5, ruleset_id, user["id"]))
+        if mine:
+            better = await db.one("select count(*) n from scores s join users u on u.id = s.userid where s.map_md5 = %s and s.mode = %s "
+                                  "and s.status = 2 and (u.priv & 1) = 1 and s.score > %s", (md5, ruleset_id, mine["score"]))
+            pos = better["n"] + 1
+            user_score = {"position": pos, "score": await shared_score_json({**mine, "map_id": beatmap_id}, pos)}
+    return {"scores": scores, "user_score": user_score, "score_count": total["n"]}
 
 
 @app.get("/api/v2/beatmaps/{beatmap_id}/scores")
@@ -388,12 +510,12 @@ async def beatmap_scores(beatmap_id: int, request: Request, user: dict | None = 
     q = request.query_params
     ruleset_id = ruleset_id_from(q.get("mode"))
     mod_filter = [m.upper() for m in q.getlist("mods[]") if m]
-    board = board_from_request_mods(mod_filter) if "RX" in mod_filter or any(m not in scoring.VANILLA_OK | {"RX"} for m in mod_filter) else scoring.BOARD_VANILLA
-    # relax players filter by RX in song select; everyone else sees the vanilla board
-    if "RX" in mod_filter:
-        board = scoring.BOARD_RELAX
+    # relax players filter by RX in song select and get Lazer Relax; everyone else gets the board shared with stable
+    board = scoring.BOARD_RELAX if "RX" in mod_filter and ruleset_id in (0, 1, 2) else scoring.BOARD_VANILLA
     limit = max(1, min(int(q.get("limit") or 50), 100))
     scope = (q.get("type") or "global").lower()
+    if board == scoring.BOARD_VANILLA:
+        return await stable_beatmap_scores(beatmap_id, ruleset_id, scope, limit, user)
 
     where = "s.beatmap_id = %s and s.ruleset_id = %s and s.board = %s and s.best = 1 and (u.priv & 1) = 1"
     args: list = [beatmap_id, ruleset_id, board]
@@ -491,6 +613,58 @@ async def rank_score(score_id: int, m: dict | None) -> None:
             await db.execute("update lazer_scores set best = 0 where id = %s", (prev["id"],))
         await db.execute("update lazer_scores set best = 1 where id = %s", (score_id,))
     await recalc_stats(user_id, ruleset_id, board)
+    if board == scoring.BOARD_VANILLA:
+        await save_to_stable(score_id, m, pp)
+
+
+async def save_to_stable(score_id: int, m: dict | None, pp: float = 0.0) -> None:
+    """Normal lazer scores also go on the stable board (bancho.py's scores table)."""
+    if m is None:
+        return
+    async with shared_lock:
+        row = await db.one("select * from lazer_scores where id = %s", (score_id,))
+        if not row or row["board"] != scoring.BOARD_VANILLA or row["bancho_score_id"]:
+            return
+        try:
+            await shared.save(row, m, pp)
+        except Exception as exc:
+            print("saving to stable failed", score_id, exc, flush=True)
+
+
+async def add_columns() -> None:
+    has = await db.one("select count(*) n from information_schema.columns where table_schema = database() "
+                       "and table_name = 'lazer_scores' and column_name = 'bancho_score_id'")
+    if not has["n"]:
+        await db.execute("alter table lazer_scores add column bancho_score_id bigint null, add index (bancho_score_id)")
+
+
+async def startup_jobs() -> None:
+    try:
+        await migrate()
+    except Exception as exc:
+        print("migrate failed", exc, flush=True)
+    await recheck_unranked()
+
+
+async def migrate() -> None:
+    """One-time move to the shared boards: old Lazer Mods scores moved, older normal lazer scores copied to stable."""
+    moved = await db.all("select id, user_id, ruleset_id, mods from lazer_scores where board = %s", (scoring.BOARD_MODS,))
+    for r in moved:
+        await db.execute("update lazer_scores set board = %s, best = 0 where id = %s",
+                         (scoring.board_for(json.loads(r["mods"]), r["ruleset_id"]), r["id"]))
+    if moved:
+        await db.execute("delete from lazer_stats where board = %s", (scoring.BOARD_MODS,))
+        print(f"moved {len(moved)} Lazer Mods scores to the normal boards", flush=True)
+    # re-rank moved scores and copy older normal scores to stable (oldest first, so the best scores end up right)
+    moved_ids = {r["id"] for r in moved}
+    todo = await db.all("select id, beatmap_id, board, bancho_score_id from lazer_scores where passed = 1 and ranked = 1 order by id")
+    for r in todo:
+        if r["id"] not in moved_ids and not (r["board"] == scoring.BOARD_VANILLA and r["bancho_score_id"] is None):
+            continue
+        try:
+            await rank_score(r["id"], await maps.lookup(id=r["beatmap_id"]))
+        except Exception as exc:
+            print("migrate failed", r["id"], exc, flush=True)
 
 
 async def recheck_unranked() -> None:
@@ -540,6 +714,8 @@ async def submit_score(beatmap_id: int, token_id: int, request: Request, user: d
     )
     m = await maps.lookup(id=beatmap_id)
     await rank_score(score_id, m)
+    if not passed and board == scoring.BOARD_VANILLA:
+        await save_to_stable(score_id, m)  # stable counts failed plays too
     row = await db.one("select * from lazer_scores where id = %s", (score_id,))
     return score_json(row, user, beatmap=m)
 
@@ -547,6 +723,12 @@ async def submit_score(beatmap_id: int, token_id: int, request: Request, user: d
 @app.get("/api/v2/scores/{score_id}")
 @app.get("/api/v2/scores/{mode}/{score_id}")
 async def get_score(score_id: int, mode: str | None = None):
+    if score_id >= stable.STABLE_ID:
+        r = await db.one("select s.*, u.name, u.country, u.latest_activity, m.id map_id from scores s join users u on u.id = s.userid "
+                         "left join maps m on m.md5 = s.map_md5 where s.id = %s", (score_id - stable.STABLE_ID,))
+        if not r:
+            raise HTTPException(404, "Score not found.")
+        return stable_score_json(r, beatmap=await maps.lookup(id=r["map_id"]) if r["map_id"] else None)
     row = await db.one("select s.*, u.name, u.country, u.latest_activity from lazer_scores s join users u on u.id = s.user_id where s.id = %s", (score_id,))
     if not row:
         raise HTTPException(404, "Score not found.")
@@ -559,8 +741,9 @@ async def user_scores(user_id: int, kind: str, mode: str | None = None, limit: i
     ruleset_id = ruleset_id_from(mode)
     limit = max(1, min(limit, 100))
     if kind == "best":
-        rows = await db.all("select * from lazer_scores where user_id = %s and ruleset_id = %s and board = 'vn' and best = 1 and ranked = 1 "
-                            "order by pp desc limit %s offset %s", (user_id, ruleset_id, limit, offset))
+        best = await db.all("select s.*, m.id map_id from scores s join maps m on m.md5 = s.map_md5 where s.userid = %s and s.mode = %s "
+                            "and s.status = 2 and m.status in (2, 3) order by s.pp desc limit %s offset %s", (user_id, ruleset_id, limit, offset))
+        return [await shared_score_json(r, beatmap=await maps.lookup(id=r["map_id"])) for r in best]
     elif kind == "recent":
         rows = await db.all("select * from lazer_scores where user_id = %s and ruleset_id = %s order by id desc limit %s offset %s",
                             (user_id, ruleset_id, limit, offset))
@@ -580,14 +763,14 @@ async def rankings(mode: str, request: Request):
     ruleset_id = ruleset_id_from(mode)
     page = max(1, int(request.query_params.get("cursor[page]") or request.query_params.get("page") or 1))
     country = request.query_params.get("country")
-    where = "s.ruleset_id = %s and s.board = 'vn' and s.pp > 0 and (u.priv & 1) = 1"
+    where = "s.mode = %s and s.pp > 0 and (u.priv & 1) = 1"
     args: list = [ruleset_id]
     if country:
         where += " and u.country = %s"
         args.append(country.lower())
-    rows = await db.all(f"select s.*, u.* from lazer_stats s join users u on u.id = s.user_id where {where} order by s.pp desc limit 50 offset %s",
+    rows = await db.all(f"select u.* from stats s join users u on u.id = s.id where {where} order by s.pp desc limit 50 offset %s",
                         tuple(args + [(page - 1) * 50]))
-    total = await db.one(f"select count(*) n from lazer_stats s join users u on u.id = s.user_id where {where}", tuple(args))
+    total = await db.one(f"select count(*) n from stats s join users u on u.id = s.id where {where}", tuple(args))
     ranking = []
     for i, r in enumerate(rows):
         st = await statistics(r, ruleset_id)

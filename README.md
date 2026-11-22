@@ -8,7 +8,7 @@ Plain HTML, CSS and JavaScript with no build step. It reads the server's
 ## Pages
 
 - Home with live server stats
-- Leaderboards: Stable, Stable Relax, and Lazer, Lazer Relax, Lazer Mods (coming soon)
+- Leaderboards: Regular (stable and lazer together, lazer fun mods count as normal mods), Stable Relax, Lazer Relax
 - Player profiles (`/u/<id or name>`) and beatmap pages (`/b/<id>`)
 - Sign up, log in, how to connect, about and rules
 
