@@ -6,7 +6,7 @@ const SERVER_DOMAIN = "oily.ilystudios.net";
 const AVATARS = `https://a.${SERVER_DOMAIN}`;
 // Cloudflare Turnstile site key (public). Empty = no captcha on sign-up.
 // The matching secret goes in /opt/bancho/.env as CAPTCHA_PROVIDER=turnstile + CAPTCHA_SECRET.
-const TURNSTILE_SITEKEY = "";
+const TURNSTILE_SITEKEY = "0x4AAAAAAGNnlzR1MzxkFoBI";
 
 // ---------- leaderboards ----------
 // Each board maps the four rulesets (osu, taiko, catch, mania) to a bancho.py mode id.
