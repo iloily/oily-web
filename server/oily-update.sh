@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # o!ily server update: website, extras (banners/colours/o!ily Ranked), in-game branding, nightly backups.
 # Run on the VPS as root. Safe to run again any time to update everything.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "!! FAILED: $BASH_COMMAND" >&2' ERR
 main() {
 D="oily.ilystudios.net"
 
@@ -62,10 +63,11 @@ echo "== 5/6 Nightly backups =="
 mkdir -p /opt/backups && chmod 700 /opt/backups
 printf '%s\n' '#!/usr/bin/env bash' \
  'set -euo pipefail' \
+ 'trap '"'"'echo "!! backup FAILED: $BASH_COMMAND" >&2'"'"' ERR' \
  'cd /opt/bancho' \
  'C="docker compose --env-file .env -f docker-compose.yml -f oily.override.yml"' \
  'T=$(date +%F-%H%M)' \
- '$C exec -T mysql sh -c '"'"'exec mysqldump --single-transaction --no-tablespaces -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'"'"' 2>/dev/null < /dev/null | gzip > /opt/backups/db-$T.sql.gz' \
+ '$C exec -T mysql sh -c '"'"'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump --single-transaction --no-tablespaces -u"$MYSQL_USER" "$MYSQL_DATABASE"'"'"' < /dev/null | gzip > /opt/backups/db-$T.sql.gz' \
  '$C exec -T bancho tar czf - -C /srv/root/.data avatars osr < /dev/null > /opt/backups/files-$T.tar.gz' \
  '$C exec -T extras tar czf - -C /data . < /dev/null > /opt/backups/extras-$T.tar.gz' \
  'find /opt/backups -name "db-*.sql.gz" -mtime +14 -delete' \
