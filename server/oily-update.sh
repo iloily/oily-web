@@ -76,7 +76,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
 chmod 700 /usr/local/bin/oily-backup
 echo '0 4 * * * root /usr/local/bin/oily-backup >> /var/log/oily-backup.log 2>&1' > /etc/cron.d/oily-backup
 sleep 10
-/usr/local/bin/oily-backup < /dev/null
+/usr/local/bin/oily-backup < /dev/null || echo "!! first backup failed (see above); the rest of the update continues"
 ls -lh /opt/backups | tail -4
 
 echo "== 6/6 Checks =="
