@@ -2,6 +2,7 @@
 # o!ily server update: website, extras (banners/colours/o!ily Ranked), in-game branding, nightly backups.
 # Run on the VPS as root. Safe to run again any time to update everything.
 set -euo pipefail
+main() {
 D="oily.ilystudios.net"
 
 echo "== 1/6 Website =="
@@ -64,16 +65,16 @@ printf '%s\n' '#!/usr/bin/env bash' \
  'cd /opt/bancho' \
  'C="docker compose --env-file .env -f docker-compose.yml -f oily.override.yml"' \
  'T=$(date +%F-%H%M)' \
- '$C exec -T mysql sh -c '"'"'exec mysqldump --single-transaction -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'"'"' 2>/dev/null | gzip > /opt/backups/db-$T.sql.gz' \
- '$C exec -T bancho tar czf - -C /srv/root/.data avatars osr > /opt/backups/files-$T.tar.gz' \
- '$C exec -T extras tar czf - -C /data . > /opt/backups/extras-$T.tar.gz' \
+ '$C exec -T mysql sh -c '"'"'exec mysqldump --single-transaction --no-tablespaces -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'"'"' 2>/dev/null < /dev/null | gzip > /opt/backups/db-$T.sql.gz' \
+ '$C exec -T bancho tar czf - -C /srv/root/.data avatars osr < /dev/null > /opt/backups/files-$T.tar.gz' \
+ '$C exec -T extras tar czf - -C /data . < /dev/null > /opt/backups/extras-$T.tar.gz' \
  'find /opt/backups -name "db-*.sql.gz" -mtime +14 -delete' \
  'find /opt/backups \( -name "files-*.tar.gz" -o -name "extras-*.tar.gz" \) -mtime +7 -delete' \
  'echo "backup $T done: $(du -sh /opt/backups | cut -f1) total"' > /usr/local/bin/oily-backup
 chmod 700 /usr/local/bin/oily-backup
 echo '0 4 * * * root /usr/local/bin/oily-backup >> /var/log/oily-backup.log 2>&1' > /etc/cron.d/oily-backup
 sleep 10
-/usr/local/bin/oily-backup
+/usr/local/bin/oily-backup < /dev/null
 ls -lh /opt/backups | tail -4
 
 echo "== 6/6 Checks =="
@@ -83,3 +84,5 @@ curl -s -o /dev/null -w "website: HTTP %{http_code}\n" "https://$D/" || true
 curl -s -o /dev/null -w "extras: HTTP %{http_code}\n" "https://$D/extras/ranked" || true
 curl -s -o /dev/null -w "menu icon: HTTP %{http_code}\n" "https://$D/assets/menu-icon.png" || true
 echo "== Done. Restart osu! to see the new menu icon and backgrounds. =="
+}
+main "$@" < /dev/null
