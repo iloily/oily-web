@@ -167,3 +167,4 @@ input[type=color] { width: 38px; height: 32px; padding: 2px; }
   .profile-card .banner { height: 120px; }
   h1 { font-size: 28px; }
 }
+.error-text { color: #ff6b81; }

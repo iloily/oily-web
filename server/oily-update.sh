@@ -37,6 +37,18 @@ for old, new in swaps:
 p.write_text(s)
 print("welcome messages:", "o!ily" if "Welcome to o!ily" in s else "NOT CHANGED (check cho.py)")
 PY
+# staff can rank/love/unrank maps from the website: add that endpoint to bancho's v2 api
+python3 - <<'PY'
+from pathlib import Path
+p = Path("/opt/bancho/app/api/v2/maps.py")
+marker = "\n\n# --- o!ily: change a map's ranked status from the website"
+s = p.read_text()
+if marker in s:
+    s = s[: s.index(marker)]
+s += Path("/opt/oily-web/server/bancho-map-status.py").read_text()
+p.write_text(s)
+print("map status endpoint: added")
+PY
 
 echo "== 3/6 Web server config =="
 {

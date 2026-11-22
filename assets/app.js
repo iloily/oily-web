@@ -82,6 +82,7 @@ function mods(bits) {
   if (out.includes("PF")) out = out.filter((m) => m !== "SD");
   return out.length ? `+${out.join("")}` : "";
 }
+const NOMINATOR = 1 << 11; // bancho privilege that may change map status
 const STATUS = { "-2": "Graveyard", "-1": "WIP", 0: "Pending", 1: "Update", 2: "Ranked", 3: "Approved", 4: "Qualified", 5: "Loved" };
 function grade(g) { return `<span class="grade grade-${esc(g)}">${esc(g === "XH" ? "SS" : g === "X" ? "SS" : g === "SH" ? "S" : g)}</span>`; }
 
@@ -396,9 +397,52 @@ async function profile(idOrName) {
   for (const x of app.querySelectorAll("[data-rs]")) x.onclick = () => set({ rs: x.dataset.rs });
 }
 
+function staffBar() {
+  if (!me || !(me.priv & NOMINATOR)) return "";
+  return `<div class="card staff-bar" style="margin-top:16px">
+      <div class="row"><b>Staff: map status</b><span class="muted" id="st-msg">Changes apply to stable and lazer right away.</span></div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <button class="btn" data-st="rank" data-scope="map">Rank map</button>
+        <button class="btn" data-st="love" data-scope="map">Love map</button>
+        <button class="btn" data-st="unrank" data-scope="map">Unrank map</button>
+        <button class="btn" data-st="rank" data-scope="set">Rank whole set</button>
+        <button class="btn" data-st="love" data-scope="set">Love whole set</button>
+        <button class="btn" data-st="unrank" data-scope="set">Unrank whole set</button>
+      </div>
+    </div>`;
+}
+
+function wireStaffBar(mapId) {
+  for (const x of app.querySelectorAll("[data-st]")) x.onclick = async () => {
+    const what = `${x.textContent.toLowerCase()}`;
+    if (x.dataset.scope === "set" && !confirm(`Really ${what}? This changes every difficulty in the set.`)) return;
+    const msg = document.getElementById("st-msg");
+    for (const b of app.querySelectorAll("[data-st]")) b.disabled = true;
+    try {
+      await api(`/maps/${mapId}/status?action=${x.dataset.st}&scope=${x.dataset.scope}`, { method: "POST" });
+      await extras("/ranked/refresh", { method: "POST" }).catch(() => {});
+      render();
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.classList.add("error-text");
+      for (const b of app.querySelectorAll("[data-st]")) b.disabled = false;
+    }
+  };
+}
+
 async function beatmap(id) {
   const q = new URLSearchParams(location.search);
-  const map = (await api(`/maps/${Number(id)}`)).data;
+  let map;
+  try {
+    map = (await api(`/maps/${Number(id)}`)).data;
+  } catch (err) {
+    if (err.status !== 404 || !me || !(me.priv & NOMINATOR)) throw err;
+    // not on o!ily yet (nobody played it on stable): staff can still rank it, which adds it
+    document.title = `Map ${Number(id)} · o!ily`;
+    app.innerHTML = `<div class="card"><h2>Map ${Number(id)}</h2><p class="muted">This map isn't on o!ily yet. Ranking or loving it adds it.</p></div>${staffBar()}`;
+    wireStaffBar(Number(id));
+    return;
+  }
   document.title = `${map.artist} - ${map.title} · o!ily`;
   // relax leaderboards only exist for osu!, taiko and catch maps; mania maps use the Stable board
   const board = boardFor(q.get("board") || (map.mode === 3 ? "stable" : "stable-rx"));
@@ -424,6 +468,7 @@ async function beatmap(id) {
         <span class="chip">${fmt(map.max_combo)}x max combo</span><span class="chip">${fmt(map.plays)} plays</span>
       </div>
     </div>
+    ${staffBar()}
     <div class="row" style="margin:16px 0">
       <div class="pills">${BOARDS.map((x) => `<button data-board="${x.key}" ${x.modes[map.mode] == null ? "disabled" : ""} class="${x.key === b.key ? "on" : ""}">${x.label}</button>`).join("")}</div>
     </div>
@@ -438,6 +483,7 @@ async function beatmap(id) {
         </tr>`).join("")}</tbody></table></div>` : `<div class="empty">No scores on this map yet.</div>`}
     </div>`;
   for (const x of app.querySelectorAll("[data-board]")) x.onclick = () => navigate(`/b/${map.id}?board=${x.dataset.board}`);
+  wireStaffBar(map.id);
 }
 
 async function login() {

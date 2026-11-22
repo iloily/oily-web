@@ -97,28 +97,38 @@ def image_type(data: bytes) -> str | None:
 
 
 # ---------- ranked map tracking ----------
+async def poll_ranked() -> None:
+    """Note maps the team ranked/loved (bancho marks them frozen) and drop ones that were unranked since."""
+    now = int(time.time())
+    seen: set[int] = set()
+    for status in (2, 5):
+        page = 1
+        while True:
+            maps = await bancho("/v2/maps", frozen="true", status=status, page=page, page_size=100)
+            if maps is None:
+                raise RuntimeError("bancho did not answer")  # never clear the list because of an outage
+            for m in maps:
+                seen.add(m["id"])
+                info = json.dumps({k: m.get(k) for k in ("artist", "title", "version", "creator", "mode", "diff", "bpm", "total_length", "plays")})
+                db.execute(
+                    "insert into ranked (map_id, set_id, status, first_seen, info) values (?, ?, ?, ?, ?) "
+                    "on conflict(map_id) do update set status = excluded.status, info = excluded.info",
+                    (m["id"], m["set_id"], status, now, info),
+                )
+            if len(maps) < 100:
+                break
+            page += 1
+    for (map_id,) in db.execute("select map_id from ranked").fetchall():
+        if map_id not in seen:
+            db.execute("delete from ranked where map_id = ?", (map_id,))
+    db.commit()
+
+
 async def track_ranked_forever() -> None:
-    """Every 5 minutes, note maps the team ranked/loved (bancho marks them frozen)."""
+    """Every 5 minutes, refresh the o!ily Ranked list."""
     while True:
         try:
-            now = int(time.time())
-            for status in (2, 5):
-                page = 1
-                while True:
-                    maps = await bancho("/v2/maps", frozen="true", status=status, page=page, page_size=100)
-                    if not maps:
-                        break
-                    for m in maps:
-                        info = json.dumps({k: m.get(k) for k in ("artist", "title", "version", "creator", "mode", "diff", "bpm", "total_length", "plays")})
-                        db.execute(
-                            "insert into ranked (map_id, set_id, status, first_seen, info) values (?, ?, ?, ?, ?) "
-                            "on conflict(map_id) do update set status = excluded.status, info = excluded.info",
-                            (m["id"], m["set_id"], status, now, info),
-                        )
-                    if len(maps) < 100:
-                        break
-                    page += 1
-            db.commit()
+            await poll_ranked()
         except Exception as exc:  # keep tracking even if bancho is restarting
             print("ranked tracking failed:", exc, flush=True)
         await asyncio.sleep(300)
@@ -208,6 +218,16 @@ async def ranked(page: int = 1, page_size: int = 50):
         (page_size, (max(page, 1) - 1) * page_size),
     ).fetchall()
     return ok([{**json.loads(r["info"] or "{}"), "map_id": r["map_id"], "set_id": r["set_id"], "status": r["status"], "ranked_at": r["first_seen"]} for r in rows])
+
+
+@app.post("/ranked/refresh")
+async def refresh_ranked(request: Request):
+    """Staff just changed a map's status on the website: update the list now instead of within 5 minutes."""
+    user = await current_user(request)
+    if not user["priv"] & NOMINATOR:
+        raise HTTPException(403, "Only staff can do that.")
+    await poll_ranked()
+    return ok()
 
 
 @app.get("/requests")
