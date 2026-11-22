@@ -7,18 +7,17 @@ const AVATARS = `https://a.${SERVER_DOMAIN}`;
 // Cloudflare Turnstile site key (public). Empty = no captcha on sign-up.
 // The matching secret goes in /opt/bancho/.env as CAPTCHA_PROVIDER=turnstile + CAPTCHA_SECRET.
 // the server owner's account (ilo); shows an "Owner" badge
-const OWNER_NAME = "ilo";
+const OWNER_NAMES = ["ilo", "lua"]; // safe names (lowercase, spaces as _) that show the Owner badge
 const TURNSTILE_SITEKEY = "0x4AAAAAAGNnlzR1MzxkFoBI";
 
 // ---------- leaderboards ----------
 // Each board maps the four rulesets (osu, taiko, catch, mania) to a mode id (null = not on that board).
-// Stable boards use bancho.py mode ids; lazer boards come from the o!ily lazer server at /lazer.
+// Stable boards use bancho.py mode ids; normal lazer scores are saved there too, so "Regular" is stable + lazer.
+// Lazer Relax comes from the o!ily lazer server at /lazer. Old ?board=lazer / lazer-mods links fall back to Regular.
 const BOARDS = [
-  { key: "stable", label: "Stable", modes: [0, 1, 2, 3] },
+  { key: "stable", label: "Regular", modes: [0, 1, 2, 3] },
   { key: "stable-rx", label: "Stable Relax", modes: [4, 5, 6, null] },
-  { key: "lazer", label: "Lazer", lazer: "vn", modes: [0, 1, 2, 3] },
   { key: "lazer-rx", label: "Lazer Relax", lazer: "rx", modes: [0, 1, 2, null] },
-  { key: "lazer-mods", label: "Lazer Mods", lazer: "mods", modes: [0, 1, 2, 3], note: "fun and conversion mods" },
 ];
 const RULESETS = ["osu!", "taiko", "catch", "mania"];
 const SORTS = [
@@ -355,7 +354,7 @@ async function profile(idOrName) {
     extras(`/profiles/${player.id}`).then((r) => r.data).catch(() => ({})),
   ]);
 
-  const staff = player.safe_name === OWNER_NAME ? "Owner" : player.priv & (1 << 14) ? "Developer" : player.priv & (1 << 13) ? "Admin" : player.priv & (1 << 12) ? "Moderator" : player.priv & (1 << 11) ? "Nominator" : "";
+  const staff = OWNER_NAMES.includes(player.safe_name) ? "Owner" : player.priv & (1 << 14) ? "Developer" : player.priv & (1 << 13) ? "Admin" : player.priv & (1 << 12) ? "Moderator" : player.priv & (1 << 11) ? "Nominator" : "";
   const set = (changes) => navigate(`/u/${player.id}?${new URLSearchParams({ board: b.key, rs, ...changes })}`);
 
   const colour = /^#[0-9a-f]{6}$/i.test(look.colour || "") ? look.colour : "";

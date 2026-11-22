@@ -11,12 +11,8 @@ LEGACY_BITS = {
     "9K": 16777216, "1K": 67108864, "3K": 134217728, "2K": 268435456, "MR": 1073741824,
     "DC": 256,  # daycore plays like HT for pp
 }
-# mods allowed on the normal boards (with default settings, except Classic)
-VANILLA_OK = {"NF", "EZ", "HD", "HR", "SD", "PF", "DT", "NC", "HT", "DC", "FL", "SO", "TD", "CL", "FI",
-              "1K", "2K", "3K", "4K", "5K", "6K", "7K", "8K", "9K", "10K"}
-SETTINGS_OK = {"CL"}
-
-BOARD_VANILLA, BOARD_RELAX, BOARD_MODS = "vn", "rx", "mods"
+BOARD_VANILLA, BOARD_RELAX = "vn", "rx"
+BOARD_MODS = "mods"  # old "anything goes" board, merged into vn/rx at startup
 
 
 def acronyms(mods: list[dict]) -> list[str]:
@@ -24,14 +20,11 @@ def acronyms(mods: list[dict]) -> list[str]:
 
 
 def board_for(mods: list[dict], ruleset_id: int) -> str:
-    """Which leaderboard a score belongs on: vanilla, relax, or the 'anything goes' mods board."""
-    names = set(acronyms(mods))
-    for m in mods or []:
-        if m.get("settings") and str(m.get("acronym", "")).upper() not in SETTINGS_OK:
-            return BOARD_MODS  # custom rates and other tweaked mods
-    if "RX" in names and ruleset_id in (0, 1, 2):
-        return BOARD_RELAX if names - {"RX"} <= VANILLA_OK else BOARD_MODS
-    return BOARD_VANILLA if names <= VANILLA_OK else BOARD_MODS
+    """Which leaderboard a score belongs on: relax (lazer only), or the normal board shared with stable.
+    Fun mods and tweaked mod settings count like normal mods (ilo, 2026-11-22)."""
+    if "RX" in set(acronyms(mods)) and ruleset_id in (0, 1, 2):
+        return BOARD_RELAX
+    return BOARD_VANILLA
 
 
 def legacy_mods(mods: list[dict]) -> int:
