@@ -83,8 +83,8 @@ const STATUS = { "-2": "Graveyard", "-1": "WIP", 0: "Pending", 1: "Update", 2: "
 function grade(g) { return `<span class="grade grade-${esc(g)}">${esc(g === "XH" ? "SS" : g === "X" ? "SS" : g === "SH" ? "S" : g)}</span>`; }
 
 // ---------- api ----------
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
+async function api(path, opts = {}, base = API) {
+  const res = await fetch(base + path, {
     credentials: "same-origin",
     headers: typeof opts.body === "string" ? { "Content-Type": "application/json" } : {},
     ...opts,
@@ -99,6 +99,9 @@ async function api(path, opts = {}) {
   }
   return body;
 }
+
+// o!ily extras (banners, colours, o!ily Ranked, map requests) live at /extras
+function extras(path, opts = {}) { return api(path, opts, "/extras"); }
 
 // ---------- session ----------
 let me = null;
@@ -130,6 +133,7 @@ const routes = [
   [/^\/login$/, login],
   [/^\/register$/, register],
   [/^\/settings$/, settings],
+  [/^\/ranked$/, ranked],
   [/^\/u\/([^/]+)$/, profile],
   [/^\/b\/(\d+)$/, beatmap],
 ];
@@ -321,18 +325,22 @@ async function profile(idOrName) {
   if (b.modes[rs] == null) rs = 0;
   const mode = b.modes[rs];
 
-  const [stats, best, recent, status] = await Promise.all([
+  const [stats, best, recent, status, look] = await Promise.all([
     api(`/players/${player.id}/stats/${mode}`).then((r) => r.data).catch(() => null),
     api(`/players/${player.id}/scores?scope=best&mode=${mode}&limit=50`).then((r) => r.data).catch(() => []),
     api(`/players/${player.id}/scores?scope=recent&mode=${mode}&limit=10`).then((r) => r.data).catch(() => []),
     api(`/players/${player.id}/status`).then((r) => r.data).catch(() => null),
+    extras(`/profiles/${player.id}`).then((r) => r.data).catch(() => ({})),
   ]);
 
   const staff = player.priv & (1 << 14) ? "Developer" : player.priv & (1 << 13) ? "Admin" : player.priv & (1 << 12) ? "Moderator" : player.priv & (1 << 11) ? "Nominator" : "";
   const set = (changes) => navigate(`/u/${player.id}?${new URLSearchParams({ board: b.key, rs, ...changes })}`);
 
+  const colour = /^#[0-9a-f]{6}$/i.test(look.colour || "") ? look.colour : "";
   app.innerHTML = `
-    <div class="card">
+    <div class="profile" ${colour ? `style="--pc:${colour}"` : ""}>
+    <div class="card profile-card">
+      ${look.banner_url ? `<div class="banner" style="background-image:url('${esc(look.banner_url)}')"></div>` : ""}
       <div class="profile-head">
         ${avatar(player.id, 110)}
         <div>
@@ -360,6 +368,7 @@ async function profile(idOrName) {
     <div class="grid grid-2" style="margin-top:16px">
       <div class="card"><h3>Best scores</h3>${best.length ? best.map((s) => scoreRow(s)).join("") : `<div class="empty">No scores yet.</div>`}</div>
       <div class="card"><h3>Recent plays</h3>${recent.length ? recent.map((s) => scoreRow(s)).join("") : `<div class="empty">No recent plays.</div>`}</div>
+    </div>
     </div>`;
 
   for (const x of app.querySelectorAll("[data-board]")) x.onclick = () => set({ board: x.dataset.board, rs: 0 });
@@ -475,6 +484,62 @@ function loadTurnstile() {
   return turnstileLoading;
 }
 
+// ---------- o!ily Ranked ----------
+const MODE_SHORT = ["osu!", "taiko", "catch", "mania"];
+async function ranked() {
+  document.title = "o!ily Ranked · o!ily";
+  const [maps, requests] = await Promise.all([
+    extras("/ranked?page_size=60").then((r) => r.data).catch(() => []),
+    extras("/requests").then((r) => r.data).catch(() => []),
+  ]);
+  const isStaff = me && me.priv & ((1 << 11) | (1 << 12) | (1 << 13) | (1 << 14));
+  app.innerHTML = `
+    <h1>o!ily Ranked</h1>
+    <p class="muted">Maps the o!ily team ranked or loved for relax. New batches every week. They give pp on the Stable Relax leaderboard.</p>
+    <div class="card">
+      <h3>Newly ranked</h3>
+      ${maps.length ? maps.map((m) => `<div class="score-row">
+        <img class="thumb" src="${cover(m.set_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <div class="info">
+          <a class="title" href="/b/${m.map_id}" data-link>${esc(m.artist)} - ${esc(m.title)} [${esc(m.version)}]</a>
+          <div class="sub">mapped by ${esc(m.creator)} · ${MODE_SHORT[m.mode] || ""} · ${Number(m.diff || 0).toFixed(2)}★ · ${Math.round(m.bpm || 0)} BPM</div>
+        </div>
+        <div class="right"><span class="badge">${m.status === 5 ? "Loved" : "Ranked"}</span><div class="sub">${when(m.ranked_at)}</div></div>
+      </div>`).join("") : `<div class="empty">No maps ranked by the team yet.</div>`}
+    </div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3>Request a map</h3>
+        ${me ? `<form id="f-req" class="form" style="max-width:none">
+          <label>Beatmap link<input name="map" placeholder="https://osu.ppy.sh/beatmapsets/123#osu/456" required></label>
+          <label>Why is it good for relax? (optional)<input name="note" maxlength="300"></label>
+          <div id="m-req"></div>
+          <button class="btn btn-accent" type="submit">Send request</button>
+        </form>` : `<p class="muted"><a href="/login" data-link>Log in</a> to request maps.</p>`}
+        ${isStaff ? `<p class="muted" style="margin-bottom:0">Staff: in game, pick the map, type <code>/np</code> in a chat with BanchoBot, then send <code>!map rank map</code> (or <code>!map love map</code>, or <code>set</code> for the whole set). It shows up here within 5 minutes.</p>` : ""}
+      </div>
+      <div class="card">
+        <h3>Requests</h3>
+        ${requests.length ? requests.map((r) => `<div class="score-row">
+          <div class="info">
+            <a class="title" href="https://osu.ppy.sh/b/${r.map_id}" target="_blank" rel="noopener">${esc(r.title)}</a>
+            <div class="sub">by <a href="/u/${r.user_id}" data-link>${esc(r.user_name)}</a> · ${when(r.created)}${r.note ? ` · ${esc(r.note)}` : ""}</div>
+          </div>
+          ${me && (isStaff || me.id === r.user_id) ? `<button class="btn btn-small" data-del="${r.id}">${isStaff ? "Done" : "Remove"}</button>` : ""}
+        </div>`).join("") : `<div class="empty">No requests yet.</div>`}
+      </div>
+    </div>`;
+  if ($("#f-req")) $("#f-req").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try { await extras("/requests", { method: "POST", body: JSON.stringify({ map: f.get("map"), note: f.get("note") }) }); await ranked(); }
+    catch (err) { $("#m-req").innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+  };
+  for (const b of app.querySelectorAll("[data-del]")) b.onclick = async () => {
+    try { await extras(`/requests/${b.dataset.del}`, { method: "DELETE" }); await ranked(); } catch { /* ignore */ }
+  };
+}
+
 // ---------- profile settings ----------
 const COUNTRIES = "ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bl bm bn bo bq br bs bt bv bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg eh er es et fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mf mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd se sg sh si sj sk sl sm sn so sr ss st sv sx sy sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug um us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw".split(" ");
 const MODE_NAMES = [[0, "osu!"], [4, "osu! Relax"], [1, "taiko"], [5, "taiko Relax"], [2, "catch"], [6, "catch Relax"], [3, "mania"], [8, "osu! Autopilot"]];
@@ -486,6 +551,8 @@ async function settings() {
   const countryName = (c) => { try { return names ? names.of(c.toUpperCase()) : c.toUpperCase(); } catch { return c.toUpperCase(); } };
   const countries = COUNTRIES.map((c) => [c, countryName(c)]).sort((a, b) => a[1].localeCompare(b[1]));
   const msg = (id, ok, text) => { $(id).innerHTML = `<div class="${ok ? "ok" : "error"}">${esc(text)}</div>`; };
+  const look = await extras(`/profiles/${me.id}`).then((r) => r.data).catch(() => ({}));
+  const SWATCHES = ["#ff3b5c", "#ff7ab6", "#b26bff", "#5b8cff", "#3fd0e0", "#4fd18b", "#ffd65a", "#ff9142"];
 
   app.innerHTML = `
     <h1>Settings</h1>
@@ -498,6 +565,24 @@ async function settings() {
           <button class="btn btn-accent" type="submit">Upload</button>
         </form>
         <div id="m-avatar" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h3>Profile look</h3>
+        <p class="muted" style="margin-top:0">Your colour tints your name, picture glow and profile buttons.</p>
+        <div class="row" id="swatches">
+          ${SWATCHES.map((c) => `<button type="button" class="swatch ${c === look.colour ? "on" : ""}" data-colour="${c}" style="background:${c}" aria-label="${c}"></button>`).join("")}
+          <label class="row" style="gap:6px;font-weight:600">Custom <input type="color" id="colour-pick" value="${esc(look.colour || "#ff3b5c")}"></label>
+          <button type="button" class="btn btn-small" id="colour-reset">Default</button>
+        </div>
+        <div id="m-colour" style="margin-top:10px"></div>
+        <h3 style="margin-top:20px">Banner</h3>
+        ${look.banner_url ? `<div class="banner banner-preview" style="background-image:url('${esc(look.banner_url)}')"></div>` : `<p class="muted">No banner yet. Wide pictures work best (about 1500 × 400).</p>`}
+        <form id="f-banner" class="row" style="margin-top:10px">
+          <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required style="flex:1;min-width:0">
+          <button class="btn btn-accent" type="submit">Upload</button>
+          ${look.banner_url ? `<button class="btn" type="button" id="banner-remove">Remove</button>` : ""}
+        </form>
+        <div id="m-banner" style="margin-top:10px"></div>
       </div>
       <div class="card">
         <h3>Profile</h3>
@@ -535,6 +620,35 @@ async function settings() {
       await settings();
       msg("#m-avatar", true, "Profile picture updated.");
     } catch (err) { msg("#m-avatar", false, err.message); }
+  };
+
+  const saveColour = async (colour) => {
+    try {
+      await extras("/profiles/me", { method: "PUT", body: JSON.stringify({ colour }) });
+      for (const b of app.querySelectorAll(".swatch")) b.classList.toggle("on", b.dataset.colour === colour);
+      msg("#m-colour", true, colour ? "Colour saved." : "Back to the default colour.");
+    } catch (err) { msg("#m-colour", false, err.message); }
+  };
+  for (const b of app.querySelectorAll(".swatch")) b.onclick = () => saveColour(b.dataset.colour);
+  $("#colour-pick").onchange = (e) => saveColour(e.target.value);
+  $("#colour-reset").onclick = () => saveColour(null);
+
+  $("#f-banner").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = e.target.file.files[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) return msg("#m-banner", false, "That picture is over 4 MB.");
+    const body = new FormData();
+    body.append("banner_file", file);
+    try {
+      await extras("/profiles/me/banner", { method: "PUT", body });
+      await settings();
+      msg("#m-banner", true, "Banner updated.");
+    } catch (err) { msg("#m-banner", false, err.message); }
+  };
+  if ($("#banner-remove")) $("#banner-remove").onclick = async () => {
+    try { await extras("/profiles/me/banner", { method: "DELETE" }); await settings(); msg("#m-banner", true, "Banner removed."); }
+    catch (err) { msg("#m-banner", false, err.message); }
   };
 
   $("#f-profile").onsubmit = async (e) => {
