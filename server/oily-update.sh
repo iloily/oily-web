@@ -49,9 +49,10 @@ C="docker compose --env-file .env -f docker-compose.yml -f oily.override.yml"
 
 echo "== 4/6 Starting everything (extras builds the first time, about 1 minute) =="
 $C build -q extras
-$C up -d
-$C restart bancho
-$C up -d --force-recreate caddy
+# only touch bancho, extras and caddy: recreating redis would wipe the rank lists
+$C up -d --no-deps --force-recreate bancho
+$C up -d --no-deps extras
+$C up -d --no-deps --force-recreate caddy
 $C cp /opt/oily-web/assets/default-avatar.jpg bancho:/srv/root/.data/avatars/default.jpg
 
 echo "== 5/6 Nightly backups =="
@@ -74,6 +75,7 @@ sleep 10
 ls -lh /opt/backups | tail -4
 
 echo "== 6/6 Checks =="
+bash /opt/oily-web/server/rebuild-ranks.sh
 $C ps --format 'table {{.Service}}\t{{.Status}}'
 curl -s -o /dev/null -w "website: HTTP %{http_code}\n" "https://$D/" || true
 curl -s -o /dev/null -w "extras: HTTP %{http_code}\n" "https://$D/extras/ranked" || true
