@@ -34,8 +34,19 @@ const fmt = (n) => Number(n || 0).toLocaleString("en-US");
 const pct = (n) => `${Number(n || 0).toFixed(2)}%`;
 const ppFmt = (n) => `${Math.round(Number(n || 0)).toLocaleString("en-US")}pp`;
 function hours(sec) { const h = Math.floor((sec || 0) / 3600); return `${fmt(h)}h`; }
+// The server sends score times without a timezone; they are UTC (the server runs on UTC).
+function toMs(input) {
+  if (typeof input === "number") return input * 1000;
+  const str = String(input || "");
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(str) ? str : `${str}Z`);
+}
+function when(input) {
+  const t = toMs(input);
+  if (!t) return "";
+  return `<span title="${esc(new Date(t).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }))}">${ago(input)}</span>`;
+}
 function ago(input) {
-  const t = typeof input === "number" ? input * 1000 : Date.parse(input);
+  const t = toMs(input);
   if (!t) return "";
   const s = Math.max(1, Math.round((Date.now() - t) / 1000));
   const units = [[31536000, "year"], [2592000, "month"], [86400, "day"], [3600, "hour"], [60, "minute"], [1, "second"]];
@@ -283,7 +294,7 @@ function scoreRow(s, showPlayer = false) {
     ${bm ? `<img class="thumb" src="${cover(bm.set_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<div class="thumb"></div>`}
     <div class="info">
       ${bm ? `<a class="title" href="/b/${bm.id}" data-link>${esc(title)}</a>` : `<span class="title">${esc(title)}</span>`}
-      <div class="sub">${grade(s.grade)} · ${pct(s.acc)} · ${fmt(s.max_combo)}x · ${s.nmiss} miss${s.nmiss === 1 ? "" : "es"} · ${ago(s.play_time)}
+      <div class="sub">${grade(s.grade)} · ${pct(s.acc)} · ${fmt(s.max_combo)}x · ${s.nmiss} miss${s.nmiss === 1 ? "" : "es"} · ${when(s.play_time)}
         ${showPlayer && s.player ? ` · <a href="/u/${s.player.id}" data-link>${esc(s.player.name)}</a>` : ""}</div>
     </div>
     <div class="right"><div class="pp">${ppFmt(s.pp)}</div><div class="mods">${mods(s.mods)}</div></div>
@@ -325,7 +336,7 @@ async function profile(idOrName) {
           <h1 style="margin-bottom:6px">${flag(player.country)} ${esc(player.name)}</h1>
           <div class="row">
             ${staff ? `<span class="badge">${staff}</span>` : ""}
-            <span class="muted">${status ? `<span class="dot"></span>Online now` : `Last seen ${ago(player.latest_activity)}`}</span>
+            <span class="muted">${status ? `<span class="dot"></span>Online now` : `Last seen ${when(player.latest_activity)}`}</span>
             <span class="muted">· Joined ${new Date(player.creation_time * 1000).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
           </div>
         </div>
@@ -387,7 +398,7 @@ async function beatmap(id) {
           <td class="rank">#${i + 1}</td>
           <td><a class="player" href="/u/${s.player.id}" data-link>${flag(s.player.country)}${esc(s.player.name)}</a></td>
           <td class="num pp">${ppFmt(s.pp)}</td><td class="num">${pct(s.acc)}</td><td class="num">${fmt(s.max_combo)}x</td>
-          <td class="num">${s.nmiss}</td><td class="mods">${mods(s.mods)}</td><td>${grade(s.grade)}</td><td class="num muted">${ago(s.play_time)}</td>
+          <td class="num">${s.nmiss}</td><td class="mods">${mods(s.mods)}</td><td>${grade(s.grade)}</td><td class="num muted">${when(s.play_time)}</td>
         </tr>`).join("")}</tbody></table></div>` : `<div class="empty">No scores on this map yet.</div>`}
     </div>`;
   for (const x of app.querySelectorAll("[data-board]")) x.onclick = () => navigate(`/b/${map.id}?board=${x.dataset.board}`);
