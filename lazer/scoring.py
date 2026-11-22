@@ -63,13 +63,8 @@ def legacy_counts(ruleset_id: int, stats: dict) -> dict:
 
 # Lazer mods whose "speed_change" setting changes the song speed, with lazer's default speed.
 RATE_MODS = {"DT": 1.5, "NC": 1.5, "HT": 0.75, "DC": 0.75}
-# Difficulty Adjust setting name -> (Beatmap kwarg, lowest, highest). Highest/lowest are lazer's extended limits.
-DA_SETTINGS = {
-    "circle_size": ("cs", 0.0, 11.0),
-    "approach_rate": ("ar", -10.0, 11.0),
-    "overall_difficulty": ("od", 0.0, 11.0),
-    "drain_rate": ("hp", 0.0, 11.0),
-}
+# Mods that give no pp: Difficulty Adjust lets players pick easier CS/AR/OD/HP, too easy to abuse.
+NO_PP_MODS = {"DA"}
 
 
 def _number(value) -> float | None:
@@ -92,30 +87,17 @@ def clock_rate(mods: list[dict]) -> float | None:
     return None
 
 
-def difficulty_overrides(mods: list[dict]) -> dict:
-    """Map stats set by lazer's Difficulty Adjust (DA). They replace the map's own values before speed is applied,
-    like official lazer pp. Settings the player left alone keep the map's value."""
-    out = {}
-    for m in mods or []:
-        if str(m.get("acronym", "")).upper() != "DA":
-            continue
-        for key, (kwarg, lo, hi) in DA_SETTINGS.items():
-            v = _number((m.get("settings") or {}).get(key))
-            if v is not None:
-                out[kwarg] = min(max(v, lo), hi)
-    return out
-
-
 def calculate_pp(osu_file: Path, ruleset_id: int, mods: list[dict], stats: dict, combo: int) -> float:
     from akatsuki_pp_py import Beatmap, Calculator
 
+    if NO_PP_MODS & set(acronyms(mods)):
+        return 0.0
     extra = {}
     rate = clock_rate(mods)
     if rate is not None:
         extra["clock_rate"] = rate
     calc = Calculator(mode=ruleset_id, mods=legacy_mods(mods), combo=combo, **hit_counts(ruleset_id, stats), **extra)
-    beatmap = Beatmap(path=str(osu_file), **difficulty_overrides(mods))
-    pp = calc.performance(beatmap).pp
+    pp = calc.performance(Beatmap(path=str(osu_file))).pp
     if math.isnan(pp) or math.isinf(pp):
         return 0.0
     return round(pp, 3)

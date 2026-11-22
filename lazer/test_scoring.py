@@ -17,11 +17,8 @@ def test_custom_speeds():
     assert scoring.clock_rate([{"acronym": "DT", "settings": {"speed_change": "bad"}}]) == 1.5
 
 
-def test_difficulty_adjust():
-    mods = [{"acronym": "DA", "settings": {"approach_rate": 10.5, "circle_size": 4, "overall_difficulty": 99}}]
-    assert scoring.difficulty_overrides(mods) == {"ar": 10.5, "cs": 4.0, "od": 11.0}
-    assert scoring.difficulty_overrides([{"acronym": "DA"}]) == {}
-    assert scoring.difficulty_overrides([{"acronym": "HR"}]) == {}
+def test_difficulty_adjust_gives_no_pp(tmp_path):
+    assert scoring.calculate_pp(tmp_path / "missing.osu", 0, [{"acronym": "DA", "settings": {"approach_rate": 11}}], {}, 0) == 0.0
 
 
 def test_custom_speed_goes_to_mods_board():
