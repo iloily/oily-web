@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>o!ily</title>
+  <meta name="description" content="o!ily: a relax-first osu! private server.">
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" data-link>
+        <img src="/assets/logo.svg" alt="" width="30" height="30">
+        <span>o!ily</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/leaderboard" data-link>Leaderboard</a>
+        <a href="/connect" data-link>How to play</a>
+        <a href="/about" data-link>About</a>
+      </nav>
+      <div class="nav-search">
+        <input id="search" type="search" placeholder="Find a player" autocomplete="off" aria-label="Find a player">
+        <div id="search-results" class="search-results" hidden></div>
+      </div>
+      <div id="nav-account" class="nav-account"></div>
+    </div>
+  </header>
+
+  <main id="app" class="page"></main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>o!ily by ilystudios</span>
+      <span class="muted">Runs on <a href="https://github.com/osuAkatsuki/bancho.py" target="_blank" rel="noopener">bancho.py</a> (MIT). Not affiliated with ppy Pty Ltd. osu! is a trademark of ppy Pty Ltd.</span>
+    </div>
+  </footer>
+
+  <script src="/assets/app.js" type="module"></script>
+</body>
+</html>
