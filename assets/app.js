@@ -6,8 +6,8 @@ const SERVER_DOMAIN = "oily.ilystudios.net";
 const AVATARS = `https://a.${SERVER_DOMAIN}`;
 // Cloudflare Turnstile site key (public). Empty = no captcha on sign-up.
 // The matching secret goes in /opt/bancho/.env as CAPTCHA_PROVIDER=turnstile + CAPTCHA_SECRET.
-// the server owner's account id (ilo); shows an "Owner" badge
-const OWNER_ID = 3;
+// the server owner's account (ilo); shows an "Owner" badge
+const OWNER_NAME = "ilo";
 const TURNSTILE_SITEKEY = "0x4AAAAAAGNnlzR1MzxkFoBI";
 
 // ---------- leaderboards ----------
@@ -335,7 +335,7 @@ async function profile(idOrName) {
     extras(`/profiles/${player.id}`).then((r) => r.data).catch(() => ({})),
   ]);
 
-  const staff = player.id === OWNER_ID ? "Owner" : player.priv & (1 << 14) ? "Developer" : player.priv & (1 << 13) ? "Admin" : player.priv & (1 << 12) ? "Moderator" : player.priv & (1 << 11) ? "Nominator" : "";
+  const staff = player.safe_name === OWNER_NAME ? "Owner" : player.priv & (1 << 14) ? "Developer" : player.priv & (1 << 13) ? "Admin" : player.priv & (1 << 12) ? "Moderator" : player.priv & (1 << 11) ? "Nominator" : "";
   const set = (changes) => navigate(`/u/${player.id}?${new URLSearchParams({ board: b.key, rs, ...changes })}`);
 
   const colour = /^#[0-9a-f]{6}$/i.test(look.colour || "") ? look.colour : "";
