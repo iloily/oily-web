@@ -39,6 +39,8 @@ echo "== 3/6 Web server config =="
   printf '\treverse_proxy bancho:10000 {\n\t\theader_up X-Real-IP {remote_host}\n\t}\n}\n\n'
   # osu.: the game's "View profile" / beatmap links open here, send those to the website
   printf 'osu.%s {\n\t@profile path_regexp prof ^/(u|users)/([^/]+)/?$\n\tredir @profile https://%s/u/{re.prof.2} 302\n\t@map path_regexp map ^/(b|beatmaps)/([0-9]+)/?$\n\tredir @map https://%s/b/{re.map.2} 302\n\t@home path /\n\tredir @home https://%s/ 302\n\treverse_proxy bancho:10000 {\n\t\theader_up X-Real-IP {remote_host}\n\t}\n}\n\n' "$D" "$D" "$D" "$D"
+  # assets.: medal pictures shown after a score (falls back to osu!'s own copy if missing)
+  printf 'assets.%s {\n\troot * /srv/bancho-data/assets\n\t@missing not file\n\tredir @missing https://assets.ppy.sh{uri} 302\n\tfile_server\n}\n\n' "$D"
   printf 'a.%s {\n\troot * /srv/bancho-data/avatars\n\ttry_files {path} {path}.png {path}.jpg {path}.jpeg {path}.gif /default.jpg\n\theader Cache-Control "no-cache"\n\tfile_server\n}\n\n' "$D"
   printf '%s {\n\tencode gzip\n\thandle_path /api/* {\n\t\treverse_proxy bancho:10000 {\n\t\t\theader_up Host api.%s\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle_path /extras/* {\n\t\treverse_proxy extras:8000 {\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle {\n\t\troot * /srv/oily-web\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}\n' "$D" "$D"
 } > Caddyfile
