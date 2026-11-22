@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+httpx==0.28.1
+python-multipart==0.0.20
+aiomysql==0.2.0
+bcrypt==5.0.0
+akatsuki-pp-py==1.0.5

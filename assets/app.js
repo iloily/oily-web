@@ -11,14 +11,14 @@ const OWNER_NAME = "ilo";
 const TURNSTILE_SITEKEY = "0x4AAAAAAGNnlzR1MzxkFoBI";
 
 // ---------- leaderboards ----------
-// Each board maps the four rulesets (osu, taiko, catch, mania) to a bancho.py mode id.
-// null = not available on that board. Lazer boards are placeholders until o!ily's lazer server exists.
+// Each board maps the four rulesets (osu, taiko, catch, mania) to a mode id (null = not on that board).
+// Stable boards use bancho.py mode ids; lazer boards come from the o!ily lazer server at /lazer.
 const BOARDS = [
   { key: "stable", label: "Stable", modes: [0, 1, 2, 3] },
   { key: "stable-rx", label: "Stable Relax", modes: [4, 5, 6, null] },
-  { key: "lazer", label: "Lazer", lazer: true },
-  { key: "lazer-rx", label: "Lazer Relax", lazer: true },
-  { key: "lazer-mods", label: "Lazer Mods", lazer: true, note: "fun and conversion mods" },
+  { key: "lazer", label: "Lazer", lazer: "vn", modes: [0, 1, 2, 3] },
+  { key: "lazer-rx", label: "Lazer Relax", lazer: "rx", modes: [0, 1, 2, null] },
+  { key: "lazer-mods", label: "Lazer Mods", lazer: "mods", modes: [0, 1, 2, 3], note: "fun and conversion mods" },
 ];
 const RULESETS = ["osu!", "taiko", "catch", "mania"];
 const SORTS = [
@@ -75,6 +75,7 @@ const MOD_BITS = [
   [1048576, "FI"], [2097152, "RD"], [4194304, "CN"], [8388608, "TP"], [536870912, "SV2"], [1073741824, "MR"],
 ];
 function mods(bits) {
+  if (typeof bits === "string") return esc(bits); // lazer scores already carry acronyms
   let out = [];
   for (const [b, name] of MOD_BITS) if (bits & b) out.push(name);
   if (out.includes("NC")) out = out.filter((m) => m !== "DT");
@@ -228,7 +229,7 @@ async function leaderboard() {
   const q = new URLSearchParams(location.search);
   const board = boardFor(q.get("board") || "stable-rx");
   let rs = Number(q.get("rs") || 0);
-  if (!board.lazer && board.modes[rs] == null) rs = 0;
+  if (board.modes[rs] == null) rs = 0;
   const sort = SORTS.some(([k]) => k === q.get("sort")) ? q.get("sort") : "pp";
   const page = Math.max(1, Number(q.get("page") || 1));
   const country = (q.get("country") || "").toLowerCase();
@@ -245,17 +246,17 @@ async function leaderboard() {
       <div class="pills">${BOARDS.map((b) => `<button data-board="${b.key}" class="${b.key === board.key ? "on" : ""}">${b.label}</button>`).join("")}</div>
     </div>`;
 
-  if (board.lazer) {
-    app.innerHTML = `${head}<div class="card center"><h2>${board.label}: coming soon</h2>
-      <p class="muted">The ${board.label}${board.note ? ` (${board.note})` : ""} leaderboard opens when o!ily's lazer server launches. Stable and Stable Relax are live now.</p></div>`;
-    bindBoardPills(set);
-    return;
-  }
-
   const mode = board.modes[rs];
   const params = new URLSearchParams({ sort, page, page_size: 50 });
   if (country) params.set("country", country);
-  const rows = (await api(`/leaderboards/${mode}?${params}`)).data;
+  let rows;
+  if (board.lazer) {
+    params.set("board", board.lazer);
+    params.set("ruleset", rs);
+    rows = (await api(`/web/leaderboard?${params}`, {}, "/lazer")).data.map((r, i) => ({ ...r, rank: (page - 1) * 50 + i + 1 }));
+  } else {
+    rows = (await api(`/leaderboards/${mode}?${params}`)).data;
+  }
 
   app.innerHTML = `${head}
     <div class="row" style="margin-bottom:16px">
@@ -264,6 +265,7 @@ async function leaderboard() {
       <select id="sort" aria-label="Sort by">${SORTS.map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select>
       <input id="country" placeholder="Country (e.g. US)" maxlength="2" value="${esc(country.toUpperCase())}" style="width:150px">
     </div>
+    ${board.lazer ? `<p class="muted" style="margin-top:0">${board.label}${board.note ? ` (${board.note})` : ""}: scores from the o!ily lazer client.</p>` : ""}
     <div class="card" style="padding:8px 12px">
       ${rows.length ? `<div class="table-wrap"><table>
         <thead><tr><th>#</th><th>Player</th><th class="num">Performance</th><th class="num">Accuracy</th><th class="num">Plays</th><th class="num">Ranked score</th><th class="num">SS</th><th class="num">S</th><th class="num">A</th></tr></thead>
@@ -296,6 +298,16 @@ function bindBoardPills(set) {
   for (const b of app.querySelectorAll("[data-board]")) b.onclick = () => set({ board: b.dataset.board, rs: 0, page: 1 });
 }
 
+// lazer scores (osu-web shape) -> the shape scoreRow uses
+function fromLazer(s) {
+  const b = s.beatmap;
+  return {
+    beatmap: b ? { id: b.id, set_id: b.beatmapset_id, version: b.version, artist: b.beatmapset?.artist, title: b.beatmapset?.title } : null,
+    grade: s.rank, acc: s.accuracy * 100, max_combo: s.max_combo, nmiss: s.statistics?.miss || 0,
+    play_time: s.ended_at, pp: s.pp, mods: s.mods.length ? `+${s.mods.map((m) => m.acronym).join("")}` : "",
+  };
+}
+
 function scoreRow(s, showPlayer = false) {
   const bm = s.beatmap;
   const title = bm ? `${bm.artist} - ${bm.title} [${bm.version}]` : "Unknown map";
@@ -316,8 +328,8 @@ async function profile(idOrName) {
   const player = (await api(`/players/${encodeURIComponent(decodeURIComponent(idOrName))}`)).data;
   document.title = `${player.name} · o!ily`;
 
-  const stableBoards = BOARDS.filter((b) => !b.lazer);
-  let b = board.lazer ? stableBoards[1] : board;
+  const stableBoards = BOARDS;
+  let b = board;
   let rs = Number(q.get("rs") || 0);
   if (!q.get("board")) {
     // no choice in the address: open the player's main mode
@@ -327,10 +339,17 @@ async function profile(idOrName) {
   if (b.modes[rs] == null) rs = 0;
   const mode = b.modes[rs];
 
+  const lazerData = b.lazer
+    ? api(`/web/players/${player.id}?board=${b.lazer}&ruleset=${rs}`, {}, "/lazer").then((r) => r.data).catch(() => null)
+    : Promise.resolve(null);
   const [stats, best, recent, status, look] = await Promise.all([
-    api(`/players/${player.id}/stats/${mode}`).then((r) => r.data).catch(() => null),
-    api(`/players/${player.id}/scores?scope=best&mode=${mode}&limit=50`).then((r) => r.data).catch(() => []),
-    api(`/players/${player.id}/scores?scope=recent&mode=${mode}&limit=10`).then((r) => r.data).catch(() => []),
+    b.lazer ? lazerData.then((d) => d && d.stats.play_count ? { pp: d.stats.pp, rank: d.stats.global_rank, country_rank: d.stats.country_rank,
+      acc: d.stats.hit_accuracy, plays: d.stats.play_count, playtime: d.stats.play_time } : null)
+      : api(`/players/${player.id}/stats/${mode}`).then((r) => r.data).catch(() => null),
+    b.lazer ? lazerData.then((d) => (d ? d.best.map(fromLazer) : []))
+      : api(`/players/${player.id}/scores?scope=best&mode=${mode}&limit=50`).then((r) => r.data).catch(() => []),
+    b.lazer ? lazerData.then((d) => (d ? d.recent.map(fromLazer) : []))
+      : api(`/players/${player.id}/scores?scope=recent&mode=${mode}&limit=10`).then((r) => r.data).catch(() => []),
     api(`/players/${player.id}/status`).then((r) => r.data).catch(() => null),
     extras(`/profiles/${player.id}`).then((r) => r.data).catch(() => ({})),
   ]);
@@ -383,9 +402,12 @@ async function beatmap(id) {
   document.title = `${map.artist} - ${map.title} · o!ily`;
   // relax leaderboards only exist for osu!, taiko and catch maps; mania maps use the Stable board
   const board = boardFor(q.get("board") || (map.mode === 3 ? "stable" : "stable-rx"));
-  const b = board.lazer ? boardFor("stable") : board;
-  const mode = b.modes[map.mode] ?? b.modes[0];
-  const scores = (await api(`/maps/${map.id}/scores?mode=${mode}&limit=50`).catch(() => ({ data: [] }))).data;
+  const b = board.modes[map.mode] == null ? boardFor("stable") : board;
+  const mode = b.modes[map.mode];
+  const scores = b.lazer
+    ? (await api(`/web/maps/${map.id}/scores?board=${b.lazer}&ruleset=${map.mode}`, {}, "/lazer").catch(() => ({ data: [] }))).data
+        .map((s) => ({ ...fromLazer(s), player: s.player }))
+    : (await api(`/maps/${map.id}/scores?mode=${mode}&limit=50`).catch(() => ({ data: [] }))).data;
   const mins = `${Math.floor(map.total_length / 60)}:${String(map.total_length % 60).padStart(2, "0")}`;
 
   app.innerHTML = `
@@ -403,7 +425,7 @@ async function beatmap(id) {
       </div>
     </div>
     <div class="row" style="margin:16px 0">
-      <div class="pills">${BOARDS.filter((x) => !x.lazer).map((x) => `<button data-board="${x.key}" ${x.modes[map.mode] == null ? "disabled" : ""} class="${x.key === b.key ? "on" : ""}">${x.label}</button>`).join("")}</div>
+      <div class="pills">${BOARDS.map((x) => `<button data-board="${x.key}" ${x.modes[map.mode] == null ? "disabled" : ""} class="${x.key === b.key ? "on" : ""}">${x.label}</button>`).join("")}</div>
     </div>
     <div class="card" style="padding:8px 12px">
       ${scores.length ? `<div class="table-wrap"><table>

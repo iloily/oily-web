@@ -44,21 +44,24 @@ echo "== 3/6 Web server config =="
   printf '\treverse_proxy bancho:10000 {\n\t\theader_up X-Real-IP {remote_host}\n\t}\n}\n\n'
   # osu.: the game's "View profile" / beatmap links open here, send those to the website
   printf 'osu.%s {\n\t@profile path_regexp prof ^/(u|users)/([^/]+)/?$\n\tredir @profile https://%s/u/{re.prof.2} 302\n\t@map path_regexp map ^/(b|beatmaps)/([0-9]+)/?$\n\tredir @map https://%s/b/{re.map.2} 302\n\t@home path /\n\tredir @home https://%s/ 302\n\treverse_proxy bancho:10000 {\n\t\theader_up X-Real-IP {remote_host}\n\t}\n}\n\n' "$D" "$D" "$D" "$D"
+  # lazer.: the o!ily lazer server (the o!ily lazer client talks to this)
+  printf 'lazer.%s {\n\tencode gzip\n\treverse_proxy lazer:8000 {\n\t\theader_up X-Real-IP {remote_host}\n\t}\n}\n\n' "$D"
   # assets.: medal pictures shown after a score (falls back to osu!'s own copy if missing)
   printf 'assets.%s {\n\troot * /srv/bancho-data/assets\n\t@missing not file\n\tredir @missing https://assets.ppy.sh{uri} 302\n\tfile_server\n}\n\n' "$D"
   printf 'a.%s {\n\troot * /srv/bancho-data/avatars\n\ttry_files {path} {path}.png {path}.jpg {path}.jpeg {path}.gif /default.jpg\n\theader Cache-Control "no-cache"\n\tfile_server\n}\n\n' "$D"
-  printf '%s {\n\tencode gzip\n\thandle_path /api/* {\n\t\treverse_proxy bancho:10000 {\n\t\t\theader_up Host api.%s\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle_path /extras/* {\n\t\treverse_proxy extras:8000 {\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle {\n\t\troot * /srv/oily-web\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}\n' "$D" "$D"
+  printf '%s {\n\tencode gzip\n\thandle_path /api/* {\n\t\treverse_proxy bancho:10000 {\n\t\t\theader_up Host api.%s\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle_path /lazer/* {\n\t\treverse_proxy lazer:8000\n\t}\n\t@users path_regexp users ^/users/([0-9]+)\n\tredir @users /u/{re.users.1} 302\n\t@maps path_regexp maps ^/beatmaps/([0-9]+)\n\tredir @maps /b/{re.maps.1} 302\n\thandle_path /extras/* {\n\t\treverse_proxy extras:8000 {\n\t\t\theader_up X-Real-IP {remote_host}\n\t\t}\n\t}\n\thandle {\n\t\troot * /srv/oily-web\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}\n' "$D" "$D"
 } > Caddyfile
 
-printf 'services:\n  bancho:\n    ports: !reset []\n    restart: unless-stopped\n  extras:\n    build: /opt/oily-web/extras\n    image: oily-extras:latest\n    restart: unless-stopped\n    environment:\n      API_HOST: api.%s\n    volumes:\n      - extras_data:/data\n    depends_on:\n      - bancho\n  caddy:\n    image: caddy:2-alpine\n    restart: unless-stopped\n    ports:\n      - "80:80"\n      - "443:443"\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile:ro\n      - caddy_data:/data\n      - caddy_config:/config\n      - /opt/oily-web:/srv/oily-web:ro\n      - data:/srv/bancho-data:ro\n    depends_on:\n      - bancho\n      - extras\nvolumes:\n  caddy_data:\n  caddy_config:\n  extras_data:\n' "$D" > oily.override.yml
+printf 'services:\n  bancho:\n    ports: !reset []\n    restart: unless-stopped\n  extras:\n    build: /opt/oily-web/extras\n    image: oily-extras:latest\n    restart: unless-stopped\n    environment:\n      API_HOST: api.%s\n    volumes:\n      - extras_data:/data\n    depends_on:\n      - bancho\n  lazer:\n    build: /opt/oily-web/lazer\n    image: oily-lazer:latest\n    restart: unless-stopped\n    env_file:\n      - .env\n    environment:\n      DOMAIN: %s\n    volumes:\n      - lazer_data:/data\n      - data:/bancho-data:ro\n    depends_on:\n      - mysql\n  caddy:\n    image: caddy:2-alpine\n    restart: unless-stopped\n    ports:\n      - "80:80"\n      - "443:443"\n    volumes:\n      - ./Caddyfile:/etc/caddy/Caddyfile:ro\n      - caddy_data:/data\n      - caddy_config:/config\n      - /opt/oily-web:/srv/oily-web:ro\n      - data:/srv/bancho-data:ro\n    depends_on:\n      - bancho\n      - extras\n      - lazer\nvolumes:\n  caddy_data:\n  caddy_config:\n  extras_data:\n  lazer_data:\n' "$D" "$D" > oily.override.yml
 
 C="docker compose --env-file .env -f docker-compose.yml -f oily.override.yml"
 
 echo "== 4/6 Starting everything (extras builds the first time, about 1 minute) =="
-$C build -q extras
+$C build -q extras lazer
 # only touch bancho, extras and caddy: recreating redis would wipe the rank lists
 $C up -d --no-deps --force-recreate bancho
 $C up -d --no-deps extras
+$C up -d --no-deps --force-recreate lazer
 $C up -d --no-deps --force-recreate caddy
 $C cp /opt/oily-web/assets/default-avatar.jpg bancho:/srv/root/.data/avatars/default.jpg
 
@@ -87,6 +90,7 @@ bash /opt/oily-web/server/rebuild-ranks.sh
 $C ps --format 'table {{.Service}}\t{{.Status}}'
 curl -s -o /dev/null -w "website: HTTP %{http_code}\n" "https://$D/" || true
 curl -s -o /dev/null -w "extras: HTTP %{http_code}\n" "https://$D/extras/ranked" || true
+curl -s -o /dev/null -w "lazer server: HTTP %{http_code}\n" "https://lazer.$D/health" || true
 curl -s -o /dev/null -w "menu icon: HTTP %{http_code}\n" "https://$D/assets/menu-icon.png" || true
 echo "== Done. Restart osu! to see the new menu icon and backgrounds. =="
 }
