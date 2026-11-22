@@ -67,7 +67,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
  'cd /opt/bancho' \
  'C="docker compose --env-file .env -f docker-compose.yml -f oily.override.yml"' \
  'T=$(date +%F-%H%M)' \
- '$C exec -T mysql sh -c '"'"'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump --single-transaction --no-tablespaces -u"$MYSQL_USER" "$MYSQL_DATABASE"'"'"' < /dev/null | gzip > /opt/backups/db-$T.sql.gz' \
+ '$C exec -T mysql sh -c '"'"'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump --no-tablespaces -u"$MYSQL_USER" "$MYSQL_DATABASE"'"'"' < /dev/null | gzip > /opt/backups/db-$T.sql.gz' \
  '$C exec -T bancho tar czf - -C /srv/root/.data avatars osr < /dev/null > /opt/backups/files-$T.tar.gz' \
  '$C exec -T extras tar czf - -C /data . < /dev/null > /opt/backups/extras-$T.tar.gz' \
  'find /opt/backups -name "db-*.sql.gz" -mtime +14 -delete' \
