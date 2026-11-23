@@ -32,6 +32,7 @@ from pathlib import Path
 WORK = Path("/opt/oily-akatsuki")
 AKATSUKI = "https://akatsuki.gg/api/v1/beatmaps"
 MIRROR = "https://osu.direct/api/get_beatmaps"
+MIRROR_SEARCH = "https://osu.direct/api/v2/search"
 UA = "oily-akatsuki-import/1.0 (o!ily private server; one-off map list import)"
 AKATSUKI_DELAY = 1.0  # seconds between requests
 MIRROR_DELAY = 1.0
@@ -106,10 +107,48 @@ def scan_akatsuki() -> dict:
         time.sleep(AKATSUKI_DELAY)
 
 
+def official_ranked_sets() -> set[str]:
+    """Set ids that official osu! ranked or approved, from the mirror's search (100 sets a page).
+    Most of Akatsuki's hand-set maps are in here, so we don't have to check those one by one."""
+    state = load("official.json", {"done": [], "ids": []})
+    ids = set(state["ids"])
+    for status, name in ((1, "ranked"), (2, "approved")):
+        if status in state["done"]:
+            continue
+        print(f"Downloading official osu!'s {name} list (100 sets a page)...", flush=True)
+        offset, empty_in_row = 0, 0
+        while True:
+            page = get_json(MIRROR_SEARCH, {"status": status, "amount": 100, "offset": offset})
+            page = page if isinstance(page, list) else []
+            new = 0
+            for s in page:
+                st = s.get("status")
+                if st in ("ranked", "approved") or s.get("ranked") in (1, 2):
+                    if str(s["id"]) not in ids:
+                        ids.add(str(s["id"]))
+                        new += 1
+            empty_in_row = empty_in_row + 1 if new == 0 else 0
+            offset += 100
+            if (offset // 100) % 50 == 0:
+                print(f"  {offset} looked at, {len(ids)} official ranked/approved sets so far", flush=True)
+                state["ids"] = sorted(ids)
+                save("official.json", state)
+            if len(page) < 100 or empty_in_row >= 3:
+                break
+            time.sleep(MIRROR_DELAY)
+        state["done"].append(status)
+        state["ids"] = sorted(ids)
+        save("official.json", state)
+        print(f"  official ranked/approved sets: {len(ids)}", flush=True)
+    return ids
+
+
 def scan_mirror(ak_maps: dict) -> dict:
     """Official data for every set that has an Akatsuki map, keyed by set id (list of v1 diffs)."""
     sets = load("mirror.json", {})
-    todo = sorted({str(m["set_id"]) for m in ak_maps.values()} - set(sets))
+    official = official_ranked_sets()
+    todo = sorted({str(m["set_id"]) for m in ak_maps.values()} - set(sets) - official)
+    print(f"Skipping {len({str(m['set_id']) for m in ak_maps.values()} & official)} sets that official osu! already ranks.", flush=True)
     print(f"Checking official status on osu.direct: {len(todo)} sets to go ({len(sets)} done).", flush=True)
     for i, set_id in enumerate(todo, 1):
         data = get_json(MIRROR, {"s": set_id})
@@ -134,7 +173,11 @@ def scan() -> None:
     already_set_on_oily = oily_frozen_ids()
 
     plan, skipped = [], {"ranked on official osu!": 0, "loved on both": 0, "gone from the mirror": 0, "already set by o!ily staff": 0}
+    official_sets = set(load("official.json", {"ids": []})["ids"])
     for bid, m in ak_maps.items():
+        if str(m["set_id"]) in official_sets:
+            skipped["ranked on official osu!"] += 1
+            continue
         official = {str(d["beatmap_id"]): d for d in sets.get(str(m["set_id"]), [])}.get(bid)
         if official is None:
             skipped["gone from the mirror"] += 1
