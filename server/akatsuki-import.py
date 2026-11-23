@@ -19,6 +19,7 @@ Run on the VPS as root. Only uses Python's standard library.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import subprocess
@@ -46,7 +47,7 @@ OSUAPI_TO_BANCHO = {-2: 0, -1: 0, 0: 0, 1: 2, 2: 3, 3: 4, 4: 5}
 IGNORED_FILENAME_CHARS = dict.fromkeys(map(ord, r':\/*<>?"|'), None)
 
 
-def get_json(url: str, params: dict, tries: int = 5):
+def get_json(url: str, params: dict, tries: int = 8):
     full = url + "?" + urllib.parse.urlencode(params, doseq=True)
     for attempt in range(tries):
         try:
@@ -59,7 +60,7 @@ def get_json(url: str, params: dict, tries: int = 5):
             wait = 60 if e.code == 429 else 5 * (attempt + 1)
             print(f"  {e.code} from {url}, waiting {wait}s", flush=True)
             time.sleep(wait)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
             print(f"  {type(e).__name__} from {url}, retrying", flush=True)
             time.sleep(5 * (attempt + 1))
     raise SystemExit(f"!! {url} keeps failing, stopping. Run the same command again later to carry on.")
