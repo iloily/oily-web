@@ -22,6 +22,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 import scoring
+import search
 import stable
 from beatmaps import RULESET_SHORT, BeatmapStore
 from db import DB
@@ -371,9 +372,9 @@ async def download(set_id: int, noVideo: int = 0):
 
 @app.get("/api/v2/beatmapsets/search")
 @app.get("/api/v2/beatmapsets/search/")
-async def beatmapset_search():
-    # in-game beatmap browser: not hooked up yet (osu!direct on stable works)
-    return {"beatmapsets": [], "cursor_string": None, "total": 0}
+async def beatmapset_search(q: str = "", m: int | None = None, s: str = "", sort: str = "", cursor_string: str | None = None):
+    # in-game beatmap browser: answered from a beatmap mirror (see search.py)
+    return await search.search(q, m, s, sort, cursor_string)
 
 
 # ---------- scores ----------
