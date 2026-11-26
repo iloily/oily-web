@@ -830,6 +830,32 @@ async def rankings_country(mode: str, request: Request):
     return {"ranking": ranking, "cursor": {"page": page + 1} if len(rows) == 50 else None, "total": len(ranking)}
 
 
+@app.get("/api/v2/rankings/{mode}/country-relax")
+async def rankings_country_relax(mode: str, request: Request):
+    """The "country (relax)" page: countries by the total pp of their players on the Lazer Relax board (none for osu!mania)."""
+    ruleset_id = ruleset_id_from(mode)
+    page = max(1, int(request.query_params.get("cursor[page]") or request.query_params.get("page") or 1))
+    if ruleset_id not in (0, 1, 2):
+        return {"ranking": [], "cursor": None, "total": 0}
+    rows = await db.all(
+        "select u.country code, count(*) active_users, coalesce(sum(s.play_count), 0) play_count, "
+        "coalesce(sum(s.ranked_score), 0) ranked_score, coalesce(sum(s.pp), 0) performance "
+        "from lazer_stats s join users u on u.id = s.user_id "
+        "where s.ruleset_id = %s and s.board = %s and s.pp > 0 and (u.priv & 1) = 1 and u.country <> 'xx' "
+        "group by u.country order by performance desc limit 50 offset %s",
+        (ruleset_id, scoring.BOARD_RELAX, (page - 1) * 50),
+    )
+    ranking = [{
+        "code": str(r["code"]).upper(),
+        "active_users": int(r["active_users"]),
+        "play_count": int(r["play_count"]),
+        "ranked_score": int(r["ranked_score"]),
+        "performance": int(round(float(r["performance"]))),
+        "country": {"code": str(r["code"]).upper(), "name": str(r["code"]).upper()},
+    } for r in rows]
+    return {"ranking": ranking, "cursor": {"page": page + 1} if len(rows) == 50 else None, "total": len(ranking)}
+
+
 # ---------- things lazer asks for that o!ily doesn't have (yet) ----------
 @app.get("/api/v2/friends")
 async def friends(user: dict = Depends(current_user)):
