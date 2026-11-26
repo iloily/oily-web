@@ -5,4 +5,4 @@ httpx==0.28.1
 python-multipart==0.0.20
 aiomysql==0.2.0
 bcrypt==5.0.0
-akatsuki-pp-py==1.0.5
+# akatsuki-pp-py: built from lazer/pp (o!ily copy with exact-speed relax pp), see Dockerfile

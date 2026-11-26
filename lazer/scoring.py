@@ -54,10 +54,51 @@ def legacy_counts(ruleset_id: int, stats: dict) -> dict:
             "nmiss": h.get("n_misses", 0), "ngeki": h.get("n_geki", 0), "nkatu": h.get("n_katu", 0)}
 
 
+# Lazer mods whose "speed_change" setting changes the song speed, with lazer's default speed.
+RATE_MODS = {"DT": 1.5, "NC": 1.5, "HT": 0.75, "DC": 0.75}
+# Mods that give no pp (the score still shows): they make maps easier, aim for you, change speed mid-map,
+# or turn the map into something else, so their pp can't be compared fairly.
+NO_PP_MODS = {
+    "DA",  # Difficulty Adjust: pick your own CS/AR/OD/HP
+    "MG",  # Magnetised: pulls the cursor to notes
+    "AS", "WU", "WD",  # Adaptive Speed, Wind Up, Wind Down: speed changes during the map
+    "SR",  # Simplified Rhythm (taiko)
+    "HO",  # Hold Off (mania)
+    "TP",  # Target Practice: replaces the map's notes
+    "AT", "CN",  # Autoplay, Cinema
+}
+
+
+def _number(value) -> float | None:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if math.isfinite(n) else None
+
+
+def clock_rate(mods: list[dict]) -> float | None:
+    """Exact song speed from lazer's DT/NC/HT/DC, the way official lazer pp uses it. None = no speed mod."""
+    for m in mods or []:
+        a = str(m.get("acronym", "")).upper()
+        if a in RATE_MODS:
+            rate = _number((m.get("settings") or {}).get("speed_change"))
+            if rate is None:
+                rate = RATE_MODS[a]
+            return min(max(rate, 0.5), 2.0)
+    return None
+
+
 def calculate_pp(osu_file: Path, ruleset_id: int, mods: list[dict], stats: dict, combo: int) -> float:
     from akatsuki_pp_py import Beatmap, Calculator
 
-    calc = Calculator(mode=ruleset_id, mods=legacy_mods(mods), combo=combo, **hit_counts(ruleset_id, stats))
+    if NO_PP_MODS & set(acronyms(mods)):
+        return 0.0
+    extra = {}
+    rate = clock_rate(mods)
+    if rate is not None:
+        extra["clock_rate"] = rate
+    calc = Calculator(mode=ruleset_id, mods=legacy_mods(mods), combo=combo, **hit_counts(ruleset_id, stats), **extra)
     pp = calc.performance(Beatmap(path=str(osu_file))).pp
     if math.isnan(pp) or math.isinf(pp):
         return 0.0
