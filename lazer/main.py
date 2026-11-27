@@ -371,9 +371,11 @@ async def beatmapset_lookup(beatmap_id: int):
 
 @app.get("/api/v2/beatmapsets/search")
 @app.get("/api/v2/beatmapsets/search/")
-async def beatmapset_search(q: str = "", m: int | None = None, s: str = "", sort: str = "", cursor_string: str | None = None):
+async def beatmapset_search(request: Request, q: str = "", m: int | None = None, s: str = "", sort: str = "", cursor_string: str | None = None):
     # in-game beatmap browser (declared before /beatmapsets/{set_id}, which would otherwise catch "search"): answered from a beatmap mirror (see search.py)
-    return await search.search(q, m, s, sort, cursor_string)
+    # lazer pages with the "cursor" object it was given, sent back as cursor[offset]=N.
+    cursor = request.query_params.get("cursor[offset]") or cursor_string
+    return await search.search(q, m, s, sort, cursor)
 
 
 @app.get("/api/v2/beatmapsets/{set_id}")
