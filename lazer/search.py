@@ -170,7 +170,8 @@ async def search(query: str, mode: int | None, status_filter: str, sort: str, cu
     result = normalise(sets)
     answer = {
         "beatmapsets": result,
-        # A full page means there may be more.
+        # A full page means there may be more. lazer reads "cursor" (and sends it back as cursor[offset]); the website reads cursor_string.
+        "cursor": {"offset": offset + len(sets)} if len(sets) >= PAGE_SIZE else None,
         "cursor_string": str(offset + len(sets)) if len(sets) >= PAGE_SIZE else None,
         "total": offset + len(result) + (1 if len(sets) >= PAGE_SIZE else 0),
         "search": {"sort": sort or "relevance_desc"},
