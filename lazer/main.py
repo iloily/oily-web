@@ -293,6 +293,12 @@ async def find_user(lookup: str, key: str | None) -> dict | None:
     return await db.one("select * from users where safe_name = %s", (lookup.lower().replace(" ", "_"),))
 
 
+# (declared before /me/{mode}, which would otherwise catch it)
+@app.get("/api/v2/me/beatmapset-favourites")
+async def favourites(user: dict = Depends(current_user)):
+    return {"beatmapset_ids": []}
+
+
 @app.get("/api/v2/me")
 @app.get("/api/v2/me/")
 @app.get("/api/v2/me/{mode}")
@@ -312,6 +318,12 @@ async def users_lookup(request: Request):
         if u and u["priv"] & UNRESTRICTED:
             out.append(compact_user(u))
     return {"users": out}
+
+
+# (declared before /users/{lookup}/{mode}, which would otherwise catch it)
+@app.get("/api/v2/users/{user_id}/recent_activity")
+async def recent_activity(user_id: int):
+    return []
 
 
 @app.get("/api/v2/users/{lookup}")
@@ -357,6 +369,13 @@ async def beatmapset_lookup(beatmap_id: int):
     return await beatmapset(int(m["beatmapset_id"]))
 
 
+@app.get("/api/v2/beatmapsets/search")
+@app.get("/api/v2/beatmapsets/search/")
+async def beatmapset_search(q: str = "", m: int | None = None, s: str = "", sort: str = "", cursor_string: str | None = None):
+    # in-game beatmap browser (declared before /beatmapsets/{set_id}, which would otherwise catch "search"): answered from a beatmap mirror (see search.py)
+    return await search.search(q, m, s, sort, cursor_string)
+
+
 @app.get("/api/v2/beatmapsets/{set_id}")
 async def beatmapset(set_id: int):
     rows = await maps.set_rows(set_id)
@@ -368,13 +387,6 @@ async def beatmapset(set_id: int):
 @app.get("/api/v2/beatmapsets/{set_id}/download")
 async def download(set_id: int, noVideo: int = 0):
     return RedirectResponse(f"{DOWNLOAD}/{set_id}{'?noVideo=1' if noVideo else ''}", status_code=302)
-
-
-@app.get("/api/v2/beatmapsets/search")
-@app.get("/api/v2/beatmapsets/search/")
-async def beatmapset_search(q: str = "", m: int | None = None, s: str = "", sort: str = "", cursor_string: str | None = None):
-    # in-game beatmap browser: answered from a beatmap mirror (see search.py)
-    return await search.search(q, m, s, sort, cursor_string)
 
 
 # ---------- scores ----------
@@ -899,11 +911,6 @@ async def news():
     return {"news_posts": [], "news_sidebar": {"current_year": datetime.now().year, "years": [], "news_posts": []}, "search": {"limit": 12, "sort": "published_desc"}, "cursor": None}
 
 
-@app.get("/api/v2/me/beatmapset-favourites")
-async def favourites(user: dict = Depends(current_user)):
-    return {"beatmapset_ids": []}
-
-
 @app.get("/api/v2/tags")
 async def tags():
     return {"tags": []}
@@ -916,11 +923,6 @@ async def spotlights():
 
 @app.get("/api/v2/users/{user_id}/beatmapsets/{kind}")
 async def user_beatmapsets(user_id: int, kind: str):
-    return []
-
-
-@app.get("/api/v2/users/{user_id}/recent_activity")
-async def recent_activity(user_id: int):
     return []
 
 
